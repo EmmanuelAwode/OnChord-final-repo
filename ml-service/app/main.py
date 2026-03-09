@@ -175,8 +175,14 @@ class EnhancedTasteRequest(BaseModel):
     user2_track_ids: List[str] = []
     user1_album_ids: List[str] = []
     user2_album_ids: List[str] = []
-    user1_artists: List[str] = []  # Artist names (lowercase)
+    user1_artists: List[str] = []  # Artist names (for fallback matching)
     user2_artists: List[str] = []
+    # NEW: Per-track artist names for ML fallback (same order as track_ids)
+    user1_track_artists: List[str] = []  # Artist name for each track in user1_track_ids
+    user2_track_artists: List[str] = []  # Artist name for each track in user2_track_ids
+    # NEW: Per-track genres for ML fallback
+    user1_track_genres: List[str] = []   # Genre for each track in user1_track_ids
+    user2_track_genres: List[str] = []   # Genre for each track in user2_track_ids
 
 class EnhancedTasteResponse(BaseModel):
     """Response with detailed similarity breakdown."""
@@ -186,6 +192,7 @@ class EnhancedTasteResponse(BaseModel):
     shared_albums: List[str]
     shared_artists: List[str]
     breakdown: Dict[str, float]  # track_bonus, album_bonus, artist_bonus, audio_score
+    ml_coverage: Optional[Dict[str, float]] = None  # Percentage of tracks matched via ML
 
 # Mood Classification Models
 class AudioFeatures(BaseModel):
@@ -324,21 +331,37 @@ def predict_enhanced_taste(payload: EnhancedTasteRequest):
     # ML audio similarity using TruncatedSVD (if we have track data)
     audio_similarity = None
     audio_score = 0
+    ml_coverage = None
     
     all_user1_tracks = payload.user1_track_ids + payload.user1_album_ids
     all_user2_tracks = payload.user2_track_ids + payload.user2_album_ids
     
-    # Prefer ML model, fall back to cosine similarity
+    # Prefer ML model with fallback, then basic ML, then artist-based fallback
     if ml_taste_model and all_user1_tracks and all_user2_tracks:
         try:
-            sim = ml_taste_model.similarity(all_user1_tracks, all_user2_tracks)
-            if sim is not None:
-                audio_similarity = round(float(sim), 1)  # Already 0-100
-                # Audio similarity contributes up to 25% of score
-                audio_score = float(sim) * 0.25
+            # Use fallback method if we have per-track artist/genre info
+            if payload.user1_track_artists or payload.user1_track_genres:
+                result = ml_taste_model.similarity_with_fallback(
+                    all_user1_tracks,
+                    all_user2_tracks,
+                    user1_artists=payload.user1_track_artists,
+                    user2_artists=payload.user2_track_artists,
+                    user1_genres=payload.user1_track_genres,
+                    user2_genres=payload.user2_track_genres
+                )
+                if result:
+                    audio_similarity = round(result["similarity"], 1)
+                    audio_score = result["similarity"] * 0.25
+                    ml_coverage = result["ml_coverage"]
+            else:
+                # Fall back to basic similarity (track IDs only)
+                sim = ml_taste_model.similarity(all_user1_tracks, all_user2_tracks)
+                if sim is not None:
+                    audio_similarity = round(float(sim), 1)
+                    audio_score = float(sim) * 0.25
         except (ValueError, KeyError, TypeError) as e:
             # Log error but continue with other similarity measures
-            pass
+            logger.warning(f"[ML] Error computing similarity: {e}")
     elif taste_model and all_user1_tracks and all_user2_tracks:
         try:
             sim = taste_model.similarity(all_user1_tracks, all_user2_tracks)
@@ -348,6 +371,23 @@ def predict_enhanced_taste(payload: EnhancedTasteRequest):
         except (ValueError, KeyError, TypeError) as e:
             # Log error but continue with other similarity measures
             pass
+    
+    # ARTIST-BASED FALLBACK: If track-based ML failed, try using artist centroids
+    # This uses the flat artist lists that the frontend already sends
+    if audio_similarity is None and ml_taste_model and payload.user1_artists and payload.user2_artists:
+        try:
+            result = ml_taste_model.similarity_from_artists(
+                payload.user1_artists,
+                payload.user2_artists,
+                artist_genre_map=ARTIST_GENRE_MAP
+            )
+            if result:
+                audio_similarity = round(result["similarity"], 1)
+                audio_score = result["similarity"] * 0.25
+                ml_coverage = result.get("ml_coverage")
+                logger.info(f"[ML] Artist-based fallback: {result['user1_stats']['matched']}/{len(payload.user1_artists)} and {result['user2_stats']['matched']}/{len(payload.user2_artists)} artists matched")
+        except Exception as e:
+            logger.warning(f"[ML] Artist-based fallback error: {e}")
     
     # Calculate overall similarity
     # Base: average of shared item ratios
@@ -378,7 +418,8 @@ def predict_enhanced_taste(payload: EnhancedTasteRequest):
             "album_bonus": album_bonus,
             "artist_bonus": artist_bonus,
             "audio_score": round(audio_score, 1),
-        }
+        },
+        ml_coverage=ml_coverage
     )
 
 

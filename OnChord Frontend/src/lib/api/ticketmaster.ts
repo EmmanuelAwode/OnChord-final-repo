@@ -17,29 +17,49 @@ const getSupabaseHeaders = () => ({
   'apikey': SUPABASE_ANON_KEY || '',
 });
 
-// Rate limiter for Ticketmaster API (max 5 requests per second)
+// Queue-based rate limiter for Ticketmaster API (max 5 requests per second)
+// Uses a proper queue to ensure concurrent calls don't slip through
 class RateLimiter {
+  private queue: (() => void)[] = [];
+  private processing = false;
   private lastRequestTime = 0;
   private minInterval: number;
 
-  constructor(requestsPerSecond: number = 4) { // Use 4 to be safe (under 5 limit)
+  constructor(requestsPerSecond: number = 3) { // Use 3 to be extra safe (well under 5 limit)
     this.minInterval = 1000 / requestsPerSecond;
   }
 
   async throttle(): Promise<void> {
-    const now = Date.now();
-    const timeSinceLastRequest = now - this.lastRequestTime;
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+      this.processQueue();
+    });
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processing || this.queue.length === 0) return;
     
-    if (timeSinceLastRequest < this.minInterval) {
-      const waitTime = this.minInterval - timeSinceLastRequest;
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+    this.processing = true;
+    
+    while (this.queue.length > 0) {
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      
+      if (timeSinceLastRequest < this.minInterval) {
+        const waitTime = this.minInterval - timeSinceLastRequest;
+        await new Promise(r => setTimeout(r, waitTime));
+      }
+      
+      this.lastRequestTime = Date.now();
+      const resolve = this.queue.shift();
+      if (resolve) resolve();
     }
     
-    this.lastRequestTime = Date.now();
+    this.processing = false;
   }
 }
 
-const rateLimiter = new RateLimiter(4); // 4 requests per second to stay under limit
+const rateLimiter = new RateLimiter(3); // 3 requests per second to stay well under limit
 
 export interface TicketmasterEvent {
   id: string;

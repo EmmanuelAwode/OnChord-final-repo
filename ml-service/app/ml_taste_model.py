@@ -86,6 +86,11 @@ class MLTasteModel:
         self.track_embeddings: Dict[str, np.ndarray] = {}  # track_id -> learned embedding
         self.available_features: List[str] = []
         
+        # Fallback centroids (for unknown tracks)
+        self.artist_centroids: Dict[str, np.ndarray] = {}  # artist_name.lower() -> average embedding
+        self.genre_centroids: Dict[str, np.ndarray] = {}   # genre.lower() -> average embedding
+        self.artist_to_tracks: Dict[str, List[str]] = {}   # artist_name.lower() -> track_ids
+        
         # Training metadata
         self.is_trained = False
         self.training_stats = {}
@@ -128,12 +133,34 @@ class MLTasteModel:
         # Clean data
         df = df.dropna(subset=self.available_features)
         
-        # Store raw features
+        # Store raw features AND build artist-to-tracks mapping
+        artist_col = 'artists' if 'artists' in df.columns else 'artist_name' if 'artist_name' in df.columns else None
+        
         for _, row in df.iterrows():
             tid = str(row['track_id'])
             self.track_features[tid] = np.array([row[f] for f in self.available_features])
+            
+            # Build artist mapping if we have artist data
+            if artist_col and pd.notna(row.get(artist_col)):
+                artists_str = str(row[artist_col])
+                # Handle both formats: "['Artist1', 'Artist2']" or "Artist Name"
+                if artists_str.startswith('['):
+                    try:
+                        import ast
+                        artists = ast.literal_eval(artists_str)
+                    except:
+                        artists = [artists_str]
+                else:
+                    artists = [artists_str]
+                
+                for artist in artists:
+                    artist_lower = str(artist).lower().strip()
+                    if artist_lower:
+                        if artist_lower not in self.artist_to_tracks:
+                            self.artist_to_tracks[artist_lower] = []
+                        self.artist_to_tracks[artist_lower].append(tid)
         
-        logger.info(f"[MLTaste] Loaded {len(self.track_features)} tracks")
+        logger.info(f"[MLTaste] Loaded {len(self.track_features)} tracks, {len(self.artist_to_tracks)} artists")
     
     def _train_model(self):
         """
@@ -185,9 +212,76 @@ class MLTasteModel:
             "component_variance": self.svd.explained_variance_ratio_.tolist(),
         }
         
+        # Step 5: Compute artist centroids for fallback
+        self._compute_artist_centroids()
+        
+        # Step 6: Load genre centroids from SpotifyFeatures.csv
+        self._compute_genre_centroids()
+        
         self.is_trained = True
         logger.info(f"[MLTaste] Model trained successfully!")
     
+    def _compute_artist_centroids(self):
+        """
+        Compute average embedding for each artist.
+        Used as fallback when a specific track isn't in the dataset.
+        """
+        logger.info(f"[MLTaste] Computing artist centroids from {len(self.artist_to_tracks)} artists...")
+        
+        for artist, track_ids in self.artist_to_tracks.items():
+            embeddings = []
+            for tid in track_ids:
+                if tid in self.track_embeddings:
+                    embeddings.append(self.track_embeddings[tid])
+            
+            if embeddings:
+                self.artist_centroids[artist] = np.mean(embeddings, axis=0)
+        
+        logger.info(f"[MLTaste] Computed {len(self.artist_centroids)} artist centroids")
+    
+    def _compute_genre_centroids(self):
+        """
+        Compute average embedding for each genre.
+        Uses SpotifyFeatures.csv which has genre labels.
+        Falls back to this when both track AND artist are unknown.
+        """
+        # Find SpotifyFeatures.csv in data directory
+        data_dir = Path(self.csv_path).parent
+        genre_csv = data_dir / "SpotifyFeatures.csv"
+        
+        if not genre_csv.exists():
+            logger.info(f"[MLTaste] SpotifyFeatures.csv not found, skipping genre centroids")
+            return
+        
+        logger.info(f"[MLTaste] Loading genre data from {genre_csv}")
+        
+        try:
+            df = pd.read_csv(genre_csv, usecols=['track_id', 'genre'], low_memory=False)
+            
+            # Group tracks by genre
+            genre_to_tracks: Dict[str, List[str]] = {}
+            for _, row in df.iterrows():
+                genre = str(row['genre']).lower().strip()
+                tid = str(row['track_id'])
+                if genre not in genre_to_tracks:
+                    genre_to_tracks[genre] = []
+                genre_to_tracks[genre].append(tid)
+            
+            # Compute centroid for each genre
+            for genre, track_ids in genre_to_tracks.items():
+                embeddings = []
+                for tid in track_ids:
+                    if tid in self.track_embeddings:
+                        embeddings.append(self.track_embeddings[tid])
+                
+                if embeddings:
+                    self.genre_centroids[genre] = np.mean(embeddings, axis=0)
+            
+            logger.info(f"[MLTaste] Computed {len(self.genre_centroids)} genre centroids")
+            
+        except Exception as e:
+            logger.warning(f"[MLTaste] Failed to compute genre centroids: {e}")
+
     def _save_model(self):
         """Save trained model to disk."""
         if not self.is_trained:
@@ -212,6 +306,24 @@ class MLTasteModel:
             track_ids=list(self.track_embeddings.keys()),
             embeddings=np.array(list(self.track_embeddings.values()))
         )
+        
+        # Save artist centroids
+        if self.artist_centroids:
+            np.savez_compressed(
+                self.model_dir / "artist_centroids.npz",
+                artists=list(self.artist_centroids.keys()),
+                centroids=np.array(list(self.artist_centroids.values()))
+            )
+            logger.info(f"[MLTaste] Saved {len(self.artist_centroids)} artist centroids")
+        
+        # Save genre centroids
+        if self.genre_centroids:
+            np.savez_compressed(
+                self.model_dir / "genre_centroids.npz",
+                genres=list(self.genre_centroids.keys()),
+                centroids=np.array(list(self.genre_centroids.values()))
+            )
+            logger.info(f"[MLTaste] Saved {len(self.genre_centroids)} genre centroids")
         
         logger.info(f"[MLTaste] Model saved!")
     
@@ -245,6 +357,26 @@ class MLTasteModel:
                     self.track_embeddings[str(tid)] = emb
                 logger.info(f"[MLTaste] Loaded {len(self.track_embeddings)} track embeddings")
             
+            # Load artist centroids if available
+            artist_centroids_path = self.model_dir / "artist_centroids.npz"
+            if artist_centroids_path.exists():
+                data = np.load(artist_centroids_path, allow_pickle=True)
+                artists = data['artists']
+                centroids = data['centroids']
+                for artist, centroid in zip(artists, centroids):
+                    self.artist_centroids[str(artist)] = centroid
+                logger.info(f"[MLTaste] Loaded {len(self.artist_centroids)} artist centroids")
+            
+            # Load genre centroids if available
+            genre_centroids_path = self.model_dir / "genre_centroids.npz"
+            if genre_centroids_path.exists():
+                data = np.load(genre_centroids_path, allow_pickle=True)
+                genres = data['genres']
+                centroids = data['centroids']
+                for genre, centroid in zip(genres, centroids):
+                    self.genre_centroids[str(genre)] = centroid
+                logger.info(f"[MLTaste] Loaded {len(self.genre_centroids)} genre centroids")
+            
             self.is_trained = True
             logger.info(f"[MLTaste] Model loaded successfully!")
             return True
@@ -275,6 +407,123 @@ class MLTasteModel:
         # Average embeddings (user's position in latent space)
         return np.mean(embeddings, axis=0)
     
+    def _embed_user_with_fallback(
+        self, 
+        track_ids: List[str],
+        artist_names: Optional[List[str]] = None,
+        genres: Optional[List[str]] = None
+    ) -> Tuple[Optional[np.ndarray], Dict]:
+        """
+        Embed a user with artist/genre fallback for unknown tracks.
+        
+        Fallback order:
+        1. Track embedding (if track_id in dataset)
+        2. Artist centroid (if artist has other tracks in dataset)
+        3. Genre centroid (if genre is known)
+        4. Skip track
+        
+        Args:
+            track_ids: List of Spotify track IDs
+            artist_names: List of artist names (same length as track_ids)
+            genres: List of genres (same length as track_ids)
+            
+        Returns:
+            Tuple of (embedding, stats_dict)
+        """
+        if not self.is_trained:
+            return None, {"error": "model not trained"}
+        
+        embeddings = []
+        stats = {
+            "total": len(track_ids),
+            "from_track": 0,
+            "from_artist": 0,
+            "from_genre": 0,
+            "skipped": 0
+        }
+        
+        # Ensure lists are same length
+        if artist_names is None:
+            artist_names = [None] * len(track_ids)
+        if genres is None:
+            genres = [None] * len(track_ids)
+        
+        for i, tid in enumerate(track_ids):
+            embedding = None
+            
+            # 1. Try direct track lookup
+            if tid in self.track_embeddings:
+                embedding = self.track_embeddings[tid]
+                stats["from_track"] += 1
+            
+            # 2. Fallback to artist centroid
+            elif i < len(artist_names) and artist_names[i]:
+                artist_lower = str(artist_names[i]).lower().strip()
+                if artist_lower in self.artist_centroids:
+                    embedding = self.artist_centroids[artist_lower]
+                    stats["from_artist"] += 1
+            
+            # 3. Fallback to genre centroid
+            if embedding is None and i < len(genres) and genres[i]:
+                genre_lower = str(genres[i]).lower().strip()
+                if genre_lower in self.genre_centroids:
+                    embedding = self.genre_centroids[genre_lower]
+                    stats["from_genre"] += 1
+            
+            # 4. Skip if nothing found
+            if embedding is None:
+                stats["skipped"] += 1
+            else:
+                embeddings.append(embedding)
+        
+        if not embeddings:
+            return None, stats
+        
+        return np.mean(embeddings, axis=0), stats
+
+    def similarity_with_fallback(
+        self,
+        user1_tracks: List[str],
+        user2_tracks: List[str],
+        user1_artists: Optional[List[str]] = None,
+        user2_artists: Optional[List[str]] = None,
+        user1_genres: Optional[List[str]] = None,
+        user2_genres: Optional[List[str]] = None
+    ) -> Optional[Dict]:
+        """
+        Compute similarity with artist/genre fallback for unknown tracks.
+        
+        This is STILL machine learning because:
+        - Artist centroids are averages of LEARNED embeddings
+        - Genre centroids are averages of LEARNED embeddings
+        - We're using the trained SVD latent space
+        
+        Returns:
+            Dict with similarity score and fallback statistics
+        """
+        u1_embedding, u1_stats = self._embed_user_with_fallback(
+            user1_tracks, user1_artists, user1_genres
+        )
+        u2_embedding, u2_stats = self._embed_user_with_fallback(
+            user2_tracks, user2_artists, user2_genres
+        )
+        
+        if u1_embedding is None or u2_embedding is None:
+            return None
+        
+        # Cosine similarity in learned latent space
+        sim = cosine_similarity([u1_embedding], [u2_embedding])[0][0]
+        
+        return {
+            "similarity": float((sim + 1) / 2 * 100),
+            "user1_stats": u1_stats,
+            "user2_stats": u2_stats,
+            "ml_coverage": {
+                "user1": (u1_stats["from_track"] + u1_stats["from_artist"] + u1_stats["from_genre"]) / max(u1_stats["total"], 1) * 100,
+                "user2": (u2_stats["from_track"] + u2_stats["from_artist"] + u2_stats["from_genre"]) / max(u2_stats["total"], 1) * 100,
+            }
+        }
+
     def similarity(self, user1_tracks: List[str], user2_tracks: List[str]) -> Optional[float]:
         """
         Compute ML-based taste similarity.
@@ -323,6 +572,79 @@ class MLTasteModel:
         
         return profile
     
+    def similarity_from_artists(
+        self,
+        user1_artists: List[str],
+        user2_artists: List[str],
+        artist_genre_map: Optional[Dict[str, List[str]]] = None
+    ) -> Optional[Dict]:
+        """
+        Compute similarity using artist centroids (no track IDs needed).
+        
+        This is the ultimate fallback when we don't have per-track associations.
+        Uses the flat list of artist names that the frontend already sends.
+        
+        Args:
+            user1_artists: List of artist names for user 1
+            user2_artists: List of artist names for user 2
+            artist_genre_map: Optional dict mapping artist names to genres
+            
+        Returns:
+            Dict with similarity score and coverage stats, or None if no matches
+        """
+        if not self.is_trained:
+            return None
+        
+        def embed_by_artists(artists: List[str]) -> Tuple[Optional[np.ndarray], Dict]:
+            """Embed a user based on their artist list."""
+            embeddings = []
+            stats = {"total": len(artists), "matched": 0, "from_genre": 0, "skipped": 0}
+            
+            for artist in artists:
+                artist_lower = artist.lower().strip()
+                
+                # Try artist centroid first
+                if artist_lower in self.artist_centroids:
+                    embeddings.append(self.artist_centroids[artist_lower])
+                    stats["matched"] += 1
+                # Try genre fallback
+                elif artist_genre_map and artist_lower in artist_genre_map:
+                    genres = artist_genre_map[artist_lower]
+                    for genre in genres:
+                        genre_lower = genre.lower().strip()
+                        if genre_lower in self.genre_centroids:
+                            embeddings.append(self.genre_centroids[genre_lower])
+                            stats["from_genre"] += 1
+                            break
+                    else:
+                        stats["skipped"] += 1
+                else:
+                    stats["skipped"] += 1
+            
+            if not embeddings:
+                return None, stats
+            
+            return np.mean(embeddings, axis=0), stats
+        
+        u1_embedding, u1_stats = embed_by_artists(user1_artists)
+        u2_embedding, u2_stats = embed_by_artists(user2_artists)
+        
+        if u1_embedding is None or u2_embedding is None:
+            return None
+        
+        # Cosine similarity in learned latent space
+        sim = cosine_similarity([u1_embedding], [u2_embedding])[0][0]
+        
+        return {
+            "similarity": float((sim + 1) / 2 * 100),
+            "user1_stats": u1_stats,
+            "user2_stats": u2_stats,
+            "ml_coverage": {
+                "user1": (u1_stats["matched"] + u1_stats["from_genre"]) / max(u1_stats["total"], 1) * 100,
+                "user2": (u2_stats["matched"] + u2_stats["from_genre"]) / max(u2_stats["total"], 1) * 100,
+            }
+        }
+
     def find_similar_users(
         self, 
         user_tracks: List[str], 

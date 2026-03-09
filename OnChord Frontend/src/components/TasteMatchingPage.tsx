@@ -141,6 +141,15 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
             }
           );
           
+          // Log ML response for debugging
+          console.log(`[TasteMatch] ${user.username}:`, {
+            overall: result.overall_similarity,
+            audio: result.audio_similarity,
+            breakdown: result.breakdown,
+            myArtists: myMusicData.artistNames.slice(0, 5),
+            theirArtists: theirData.artistNames.slice(0, 5),
+          });
+          
           newCompatibilities[user.id] = {
             similarity: Math.round(result.overall_similarity),
             sharedArtists: result.shared_artists,
