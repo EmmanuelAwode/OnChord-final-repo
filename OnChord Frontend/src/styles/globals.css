@@ -1,0 +1,652 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --radius: 0.75rem;
+}
+
+/* OnChord Custom Color Palette - Light Theme */
+:root {
+  --background: #F5F3FF;
+  --foreground: #1A1625;
+  --card: #FFFFFF;
+  --card-foreground: #1A1625;
+  --popover: #FFFFFF;
+  --popover-foreground: #1A1625;
+  --primary: #9333EA;
+  --primary-foreground: #FFFFFF;
+  --secondary: #10B981;
+  --secondary-foreground: #FFFFFF;
+  --muted: #E9D5FF;
+  --muted-foreground: #6B4B9E;
+  --accent: #EC4899;
+  --accent-foreground: #FFFFFF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: #DDD6FE;
+  --input: #DDD6FE;
+  --input-background: #FFFFFF;
+  --switch-background: #C4B5FD;
+  --ring: #9333EA;
+  --chart-1: #9333EA;
+  --chart-2: #10B981;
+  --chart-3: #3B82F6;
+  --chart-4: #EC4899;
+  --chart-5: #F59E0B;
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #1A1625;
+  --sidebar-primary: #9333EA;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FAF5FF;
+  --sidebar-accent-foreground: #1A1625;
+  --sidebar-border: #DDD6FE;
+  --sidebar-ring: #9333EA;
+}
+
+/* OnChord Custom Color Palette - Dark Theme */
+.dark {
+  --background: #0F0A1A;
+  --foreground: #F5F3FF;
+  --card: #1A1625;
+  --card-foreground: #F5F3FF;
+  --popover: #1A1625;
+  --popover-foreground: #F5F3FF;
+  --primary: #A855F7;
+  --primary-foreground: #FFFFFF;
+  --secondary: #10B981;
+  --secondary-foreground: #FFFFFF;
+  --muted: #2D1B4E;
+  --muted-foreground: #C4B5FD;
+  --accent: #F472B6;
+  --accent-foreground: #FFFFFF;
+  --destructive: #EF4444;
+  --destructive-foreground: #F5F3FF;
+  --border: #3B2667;
+  --input: #3B2667;
+  --input-background: #1A1625;
+  --switch-background: #2D1B4E;
+  --ring: #A855F7;
+  --chart-1: #A855F7;
+  --chart-2: #10B981;
+  --chart-3: #3B82F6;
+  --chart-4: #F472B6;
+  --chart-5: #F59E0B;
+  --sidebar: #0F0A1A;
+  --sidebar-foreground: #F5F3FF;
+  --sidebar-primary: #A855F7;
+  --sidebar-primary-foreground: #F5F3FF;
+  --sidebar-accent: #1A1625;
+  --sidebar-accent-foreground: #F5F3FF;
+  --sidebar-border: #3B2667;
+  --sidebar-ring: #A855F7;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/**
+ * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
+ */
+@layer base {
+  :where(:not(:has([class*=" text-"]), :not(:has([class^="text-"])))) {
+    h1 {
+      font-size: var(--text-2xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h2 {
+      font-size: var(--text-xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h3 {
+      font-size: var(--text-lg);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h4 {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    p {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+
+    label {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    button {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    input {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+  }
+}
+
+html {
+  font-size: var(--font-size);
+  transition: font-size 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Smooth font size transitions for all text elements */
+body,
+h1, h2, h3, h4, h5, h6,
+p, span, a, label, button,
+input, textarea, select,
+div, li, td, th {
+  transition: font-size 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              line-height 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              letter-spacing 0.5s ease;
+}
+
+/* Keyframes for smooth font size change */
+@keyframes fontSizeChange {
+  0% {
+    transform: scale(0.99);
+    opacity: 0.95;
+  }
+  40% {
+    transform: scale(1.005);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Apply animation when font size changes */
+.font-transition-active * {
+  animation: fontSizeChange 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Custom Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 10px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+
+/* Navigation specific scrollbar - always visible */
+.nav-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) var(--card);
+}
+
+.nav-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.nav-scroll::-webkit-scrollbar-track {
+  background: var(--background);
+  border-radius: 10px;
+  margin: 8px 0;
+}
+
+.nav-scroll::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 10px;
+  border: 2px solid var(--card);
+}
+
+.nav-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+  border: 2px solid var(--card);
+}
+
+/* Always-visible scrollbar */
+.visible-scrollbar {
+  overflow-y: scroll !important;
+  scrollbar-width: auto !important;
+  scrollbar-color: #9333EA rgba(255, 255, 255, 0.1) !important;
+}
+
+.visible-scrollbar::-webkit-scrollbar {
+  width: 10px !important;
+  display: block !important;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.visible-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-radius: 10px;
+}
+
+.visible-scrollbar::-webkit-scrollbar-thumb {
+  background: #9333EA !important;
+  border-radius: 10px;
+  min-height: 40px;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+}
+
+.visible-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #A855F7 !important;
+}
+
+/* Hide scrollbar completely while maintaining scroll functionality */
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Smooth Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes floatUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOutLeft {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s ease-out;
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-float-up {
+  animation: floatUp 0.5s ease-out;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(167, 139, 250, 0.1),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.3s ease-out;
+}
+
+.animate-slide-out-left {
+  animation: slideOutLeft 0.3s ease-out;
+}
+
+/* Smooth transitions */
+* {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Enhanced Shadow Utilities */
+.shadow-soft {
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.1), 0 1px 3px rgba(147, 51, 234, 0.06);
+}
+
+.shadow-medium {
+  box-shadow: 0 4px 12px rgba(147, 51, 234, 0.15), 0 2px 6px rgba(147, 51, 234, 0.1);
+}
+
+.shadow-strong {
+  box-shadow: 0 8px 24px rgba(147, 51, 234, 0.2), 0 4px 12px rgba(147, 51, 234, 0.15);
+}
+
+.shadow-glow-primary {
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.4), 0 0 15px rgba(168, 85, 247, 0.3), 0 4px 20px rgba(168, 85, 247, 0.2);
+}
+
+.shadow-glow-secondary {
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.4), 0 0 15px rgba(16, 185, 129, 0.3), 0 4px 20px rgba(16, 185, 129, 0.2);
+}
+
+.shadow-glow-accent {
+  box-shadow: 0 0 30px rgba(244, 114, 182, 0.4), 0 0 15px rgba(244, 114, 182, 0.3), 0 4px 20px rgba(244, 114, 182, 0.2);
+}
+
+/* Dark mode shadows */
+.dark .shadow-soft {
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.2), 0 1px 3px rgba(168, 85, 247, 0.15);
+}
+
+.dark .shadow-medium {
+  box-shadow: 0 4px 12px rgba(168, 85, 247, 0.25), 0 2px 6px rgba(168, 85, 247, 0.2);
+}
+
+.dark .shadow-strong {
+  box-shadow: 0 8px 24px rgba(168, 85, 247, 0.3), 0 4px 12px rgba(168, 85, 247, 0.25);
+}
+
+/* Music-themed gradients */
+.gradient-purple {
+  background: linear-gradient(135deg, #9333EA 0%, #A855F7 50%, #C084FC 100%);
+}
+
+.gradient-rainbow {
+  background: linear-gradient(135deg, #A855F7 0%, #EC4899 25%, #F59E0B 50%, #10B981 75%, #3B82F6 100%);
+}
+
+.gradient-vinyl {
+  background: radial-gradient(circle at 30% 30%, rgba(168, 85, 247, 0.2) 0%, transparent 50%),
+              radial-gradient(circle at 70% 70%, rgba(16, 185, 129, 0.2) 0%, transparent 50%);
+}
+
+.gradient-stage {
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.1) 0%, transparent 100%);
+}
+
+/* Waveform pattern */
+.pattern-waveform {
+  background-image: 
+    repeating-linear-gradient(90deg, 
+      transparent, 
+      transparent 10px, 
+      rgba(168, 85, 247, 0.03) 10px, 
+      rgba(168, 85, 247, 0.03) 11px
+    );
+}
+
+/* Vinyl disc effect */
+.vinyl-disc {
+  position: relative;
+  overflow: hidden;
+}
+
+.vinyl-disc::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 200%;
+  height: 200%;
+  background: repeating-conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(168, 85, 247, 0.03) 1deg,
+    transparent 2deg
+  );
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Pulsing music effect */
+@keyframes musicPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(168, 85, 247, 0.6);
+    transform: scale(1.02);
+  }
+}
+
+.animate-music-pulse {
+  animation: musicPulse 2s ease-in-out infinite;
+}
+
+/* Beat visualization */
+@keyframes beat {
+  0%, 100% {
+    transform: scaleY(0.6);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.animate-beat {
+  animation: beat 0.6s ease-in-out infinite;
+}
+
+/* Frequency bars */
+.frequency-bar {
+  background: linear-gradient(to top, #A855F7, #EC4899);
+  animation: beat 0.8s ease-in-out infinite;
+}
+
+.frequency-bar:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.frequency-bar:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+.frequency-bar:nth-child(4) {
+  animation-delay: 0.3s;
+}
+
+.frequency-bar:nth-child(5) {
+  animation-delay: 0.4s;
+}
+
+/* Glassmorphism effect */
+.glass-effect {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dark .glass-effect {
+  background: rgba(26, 22, 37, 0.7);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+}
+
+/* Neon text effect */
+.neon-text {
+  text-shadow: 0 0 10px rgba(168, 85, 247, 0.8),
+               0 0 20px rgba(168, 85, 247, 0.6),
+               0 0 30px rgba(168, 85, 247, 0.4);
+}
+
+/* Gradient border animation */
+@keyframes gradientBorder {
+  0% {
+    border-color: #A855F7;
+  }
+  33% {
+    border-color: #10B981;
+  }
+  66% {
+    border-color: #F472B6;
+  }
+  100% {
+    border-color: #A855F7;
+  }
+}
+
+.animate-gradient-border {
+  animation: gradientBorder 3s ease-in-out infinite;
+}
+
+/* Rainbow gradient background */
+.bg-rainbow {
+  background: linear-gradient(
+    90deg,
+    #A855F7 0%,
+    #EC4899 20%,
+    #F59E0B 40%,
+    #10B981 60%,
+    #3B82F6 80%,
+    #A855F7 100%
+  );
+  background-size: 200% 100%;
+  animation: rainbow 10s linear infinite;
+}
+
+@keyframes rainbow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}

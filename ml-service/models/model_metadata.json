@@ -1,0 +1,41 @@
+{
+  "model_type": "DecisionTree",
+  "scaler_type": "StandardScaler",
+  "features": [
+    "danceability",
+    "energy",
+    "valence",
+    "acousticness",
+    "instrumentalness",
+    "liveness",
+    "speechiness",
+    "tempo"
+  ],
+  "mood_categories": [
+    "Aggressive",
+    "Chill",
+    "Hype",
+    "Melancholic",
+    "Happy",
+    "Focus",
+    "Party"
+  ],
+  "train_file": "tracks_features.csv",
+  "test_file": "SpotifyFeatures.csv",
+  "train_samples": 1204025,
+  "test_samples": 202044,
+  "accuracy": 0.9999604046643306,
+  "f1_macro": 0.999938029852429,
+  "f1_weighted": 0.9999604101690097,
+  "feature_importances": {
+    "danceability": 0.08970024302255808,
+    "energy": 0.4764443726411139,
+    "valence": 0.22007488335058084,
+    "acousticness": 0.0510138555266175,
+    "instrumentalness": 0.08392234946213098,
+    "liveness": 0.0,
+    "speechiness": 0.0055812370313645535,
+    "tempo": 0.07326305896563413
+  },
+  "trained_at": "2026-02-24T16:25:05.797869"
+}

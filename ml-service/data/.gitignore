@@ -1,0 +1,14 @@
+# Ignore all data files in this directory
+# These datasets are too large for version control
+
+# CSV datasets
+*.csv
+
+# Parquet files
+*.parquet
+
+# JSON data files
+*.json
+
+# Keep this .gitignore
+!.gitignore

@@ -1,0 +1,80 @@
+# OnChord Docker Compose Configuration
+# Run with: docker compose up --build
+
+services:
+  # Frontend React application
+  frontend:
+    build:
+      context: ./OnChord Frontend
+      dockerfile: Dockerfile
+      target: production
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_SPOTIFY_CLIENT_ID: ${VITE_SPOTIFY_CLIENT_ID}
+        VITE_SPOTIFY_REDIRECT_URI: ${VITE_SPOTIFY_REDIRECT_URI}
+        VITE_TICKETMASTER_API_KEY: ${VITE_TICKETMASTER_API_KEY}
+        VITE_ML_SERVICE_URL: ${VITE_ML_SERVICE_URL}
+    ports:
+      - "3000:80"
+    depends_on:
+      ml-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - onchord-network
+
+  # Frontend development mode (use with: docker compose --profile dev up frontend-dev)
+  frontend-dev:
+    build:
+      context: ./OnChord Frontend
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./OnChord Frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      - VITE_SPOTIFY_CLIENT_ID=${VITE_SPOTIFY_CLIENT_ID}
+      - VITE_SPOTIFY_REDIRECT_URI=http://localhost:5173/settings
+      - VITE_TICKETMASTER_API_KEY=${VITE_TICKETMASTER_API_KEY}
+      - VITE_ML_SERVICE_URL=${VITE_ML_SERVICE_URL}
+    profiles:
+      - dev
+    networks:
+      - onchord-network
+
+  # ML Service (FastAPI)
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - LASTFM_API_KEY=${LASTFM_API_KEY}
+    volumes:
+      # Mount models directory for persistence
+      - ./ml-service/models:/app/models
+      # Mount data directory (optional, for training)
+      - ./ml-service/data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - onchord-network
+
+networks:
+  onchord-network:
+    driver: bridge
+
+# Volumes for data persistence
+volumes:
+  ml-models:
