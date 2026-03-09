@@ -486,6 +486,111 @@ def get_taste_model_info():
 
 
 # -------------------------------------------------------------------
+# Debug Endpoint: Artist Match Breakdown
+# -------------------------------------------------------------------
+class ArtistMatchDebugRequest(BaseModel):
+    """Request for debugging artist matching."""
+    user1_artists: List[str]
+    user2_artists: List[str]
+
+@app.post("/debug/artist_match_breakdown")
+def debug_artist_match_breakdown(payload: ArtistMatchDebugRequest):
+    """
+    Debug endpoint to see exactly which artists matched and why.
+    Shows per-artist centroid lookup results and similarity computation.
+    """
+    if ml_taste_model is None:
+        raise HTTPException(status_code=503, detail="ML taste model not loaded")
+    
+    from sklearn.metrics.pairwise import cosine_similarity
+    import numpy as np
+    
+    results = {
+        "user1_artists": [],
+        "user2_artists": [],
+        "similarity": None,
+        "explanation": ""
+    }
+    
+    # Check each user1 artist
+    u1_embeddings = []
+    for artist in payload.user1_artists:
+        artist_lower = artist.lower().strip()
+        artist_info = {
+            "name": artist,
+            "found_in_dataset": artist_lower in ml_taste_model.artist_centroids,
+            "genre_fallback": None,
+            "embedding_source": None
+        }
+        
+        if artist_lower in ml_taste_model.artist_centroids:
+            artist_info["embedding_source"] = "artist_centroid"
+            u1_embeddings.append(ml_taste_model.artist_centroids[artist_lower])
+        elif artist_lower in ARTIST_GENRE_MAP:
+            genres = ARTIST_GENRE_MAP[artist_lower]
+            artist_info["genre_fallback"] = genres
+            for genre in genres:
+                genre_lower = genre.lower()
+                if genre_lower in ml_taste_model.genre_centroids:
+                    artist_info["embedding_source"] = f"genre_centroid:{genre}"
+                    u1_embeddings.append(ml_taste_model.genre_centroids[genre_lower])
+                    break
+        
+        if artist_info["embedding_source"] is None:
+            artist_info["embedding_source"] = "not_found"
+        
+        results["user1_artists"].append(artist_info)
+    
+    # Check each user2 artist
+    u2_embeddings = []
+    for artist in payload.user2_artists:
+        artist_lower = artist.lower().strip()
+        artist_info = {
+            "name": artist,
+            "found_in_dataset": artist_lower in ml_taste_model.artist_centroids,
+            "genre_fallback": None,
+            "embedding_source": None
+        }
+        
+        if artist_lower in ml_taste_model.artist_centroids:
+            artist_info["embedding_source"] = "artist_centroid"
+            u2_embeddings.append(ml_taste_model.artist_centroids[artist_lower])
+        elif artist_lower in ARTIST_GENRE_MAP:
+            genres = ARTIST_GENRE_MAP[artist_lower]
+            artist_info["genre_fallback"] = genres
+            for genre in genres:
+                genre_lower = genre.lower()
+                if genre_lower in ml_taste_model.genre_centroids:
+                    artist_info["embedding_source"] = f"genre_centroid:{genre}"
+                    u2_embeddings.append(ml_taste_model.genre_centroids[genre_lower])
+                    break
+        
+        if artist_info["embedding_source"] is None:
+            artist_info["embedding_source"] = "not_found"
+        
+        results["user2_artists"].append(artist_info)
+    
+    # Compute similarity if we have embeddings
+    if u1_embeddings and u2_embeddings:
+        u1_avg = np.mean(u1_embeddings, axis=0)
+        u2_avg = np.mean(u2_embeddings, axis=0)
+        sim = cosine_similarity([u1_avg], [u2_avg])[0][0]
+        results["similarity"] = round(float((sim + 1) / 2 * 100), 1)
+        
+        u1_matched = sum(1 for a in results["user1_artists"] if a["embedding_source"] != "not_found")
+        u2_matched = sum(1 for a in results["user2_artists"] if a["embedding_source"] != "not_found")
+        results["explanation"] = (
+            f"User1: {u1_matched}/{len(payload.user1_artists)} artists matched. "
+            f"User2: {u2_matched}/{len(payload.user2_artists)} artists matched. "
+            f"Cosine similarity in latent space: {results['similarity']}%"
+        )
+    else:
+        results["explanation"] = "Could not compute similarity - no artists found in dataset"
+    
+    return results
+
+
+# -------------------------------------------------------------------
 # Enhanced Taste Matching V2 - With Mood Profiles
 # -------------------------------------------------------------------
 class MusicPersonalityRequest(BaseModel):
