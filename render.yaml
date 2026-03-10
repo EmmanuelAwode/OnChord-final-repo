@@ -30,7 +30,7 @@ services:
     env: static
     rootDir: OnChord Frontend
     buildCommand: npm ci && npm run build
-    staticPublishPath: build
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
