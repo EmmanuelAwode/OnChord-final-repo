@@ -27,7 +27,6 @@ services:
   - type: web
     name: onchord-frontend
     runtime: static
-    region: oregon
     plan: free
     rootDir: OnChord Frontend
     buildCommand: npm ci && npm run build
