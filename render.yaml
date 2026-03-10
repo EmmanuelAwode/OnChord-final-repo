@@ -9,7 +9,6 @@ services:
     name: onchord-ml-service
     runtime: python
     region: oregon
-    plan: free
     rootDir: ml-service
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -24,17 +23,11 @@ services:
   # ============================================
   # Frontend (React/Vite Static Site)
   # ============================================
-  - type: web
+  - type: static
     name: onchord-frontend
-    runtime: static
-    plan: free
-    rootDir: OnChord Frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
-    headers:
-      - path: /*
-        name: Cache-Control
-        value: public, max-age=0, must-revalidate
+    rootDir: OnChord Frontend
     routes:
       - type: rewrite
         source: /*
@@ -42,17 +35,15 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
-      # These are build-time variables (VITE_ prefix)
       - key: VITE_SUPABASE_URL
-        sync: false  # Set manually
+        sync: false
       - key: VITE_SUPABASE_ANON_KEY
-        sync: false  # Set manually
+        sync: false
       - key: VITE_SPOTIFY_CLIENT_ID
-        sync: false  # Set manually
+        sync: false
       - key: VITE_SPOTIFY_REDIRECT_URI
-        sync: false  # Set manually - use your Render frontend URL
+        sync: false
       - key: VITE_TICKETMASTER_API_KEY
-        sync: false  # Set manually
+        sync: false
       - key: VITE_ML_SERVICE_URL
-        sync: false  # Set to your ML service URL from Render
-    autoDeploy: true
+        sync: false
