@@ -17,14 +17,14 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.0"
       - key: LASTFM_API_KEY
-        sync: false  # Set manually in Render dashboard
+        sync: false
     autoDeploy: true
 
-  # ============================================
-  # Frontend (React/Vite Static Site)
-  # ============================================
-  - type: static
-    name: onchord-frontend
+# ============================================
+# Frontend (React/Vite Static Site)
+# ============================================
+staticSites:
+  - name: onchord-frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     rootDir: OnChord Frontend
