@@ -248,12 +248,12 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
         </div>
 
         {mlServiceAvailable === false && (
-          <div className="flex items-center gap-3 p-4 bg-destructive/10 rounded-lg">
-            <AlertCircle className="w-5 h-5 text-destructive" />
+          <div className="flex items-center gap-3 p-4 bg-amber-500/10 rounded-lg">
+            <AlertCircle className="w-5 h-5 text-amber-500" />
             <div>
-              <p className="text-sm font-medium text-destructive">ML Service Unavailable</p>
+              <p className="text-sm font-medium text-amber-500">ML Features Limited</p>
               <p className="text-xs text-muted-foreground">
-                Start with: <code className="bg-muted px-1 rounded">cd ml-service && uvicorn app.main:app --reload</code>
+                Advanced taste matching is temporarily unavailable. Basic matching still works!
               </p>
             </div>
           </div>
