@@ -20,14 +20,15 @@ services:
         sync: false
     autoDeploy: true
 
-# ============================================
-# Frontend (React/Vite Static Site)
-# ============================================
-staticSites:
-  - name: onchord-frontend
+  # ============================================
+  # Frontend (React/Vite Static Site)
+  # ============================================
+  - type: web
+    name: onchord-frontend
+    env: static
+    rootDir: OnChord Frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
-    rootDir: OnChord Frontend
     routes:
       - type: rewrite
         source: /*
