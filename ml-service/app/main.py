@@ -28,21 +28,35 @@ try:
 except ImportError:
     pass  # python-dotenv not installed, use system env vars
 
-from app.spotify_taste_model import SpotifyTasteModel
-from app.mood_classifier import MoodClassifier, MOOD_CATEGORIES, MOOD_COLORS
+# LAZY IMPORTS - only import heavy modules when needed (saves ~200MB in LIGHT_MODE)
+SpotifyTasteModel = None
+MoodClassifier = None
+MOOD_CATEGORIES = {}
+MOOD_COLORS = {}
+GenreMoodClassifier = None
+get_hardcoded_prediction = None
+genre_mood_classifier = None
 
-# Import genre-based mood classifier (fallback when audio features unavailable)
-try:
-    from ml.genre_mood_classifier import GenreMoodClassifier, get_hardcoded_prediction
-    genre_mood_classifier = GenreMoodClassifier()
-    genre_model_path = Path(__file__).parent.parent / "models" / "genre_mood_model.json"
-    if genre_model_path.exists():
-        genre_mood_classifier.load(str(genre_model_path))
-        logger.info("[ML] Genre-mood fallback classifier loaded!")
-    else:
-        logger.info("[ML] Genre-mood model not found, using hardcoded mapping")
-except Exception as e:
-    logger.info(f"[ML] Genre-mood classifier not available: {e}")
+if not LIGHT_MODE:
+    # Full imports for local development
+    from app.spotify_taste_model import SpotifyTasteModel
+    from app.mood_classifier import MoodClassifier, MOOD_CATEGORIES, MOOD_COLORS
+    
+    # Import genre-based mood classifier (fallback when audio features unavailable)
+    try:
+        from ml.genre_mood_classifier import GenreMoodClassifier, get_hardcoded_prediction
+        genre_mood_classifier = GenreMoodClassifier()
+        genre_model_path = Path(__file__).parent.parent / "models" / "genre_mood_model.json"
+        if genre_model_path.exists():
+            genre_mood_classifier.load(str(genre_model_path))
+            logger.info("[ML] Genre-mood fallback classifier loaded!")
+        else:
+            logger.info("[ML] Genre-mood model not found, using hardcoded mapping")
+    except Exception as e:
+        logger.info(f"[ML] Genre-mood classifier not available: {e}")
+else:
+    # Minimal imports for LIGHT_MODE - just load pre-trained models
+    logger.info("[ML] LIGHT_MODE: Skipping heavy pandas/sklearn imports")
     genre_mood_classifier = None
 
 # -------------------------------------------------------------------
@@ -145,42 +159,53 @@ else:
     logger.info("[ML] LIGHT_MODE: Skipping SpotifyTasteModel (using ML model instead)")
 
 # Load ML-based taste model (uses TruncatedSVD for learned embeddings)
-# This SHOULD work in LIGHT_MODE because it loads pre-trained models
+# SKIP in LIGHT_MODE - importing MLTasteModel loads pandas/sklearn (~200MB)
 ml_taste_model = None
 MODEL_DIR = Path(__file__).parent.parent / "models"
-try:
-    from app.ml_taste_model import MLTasteModel
-    ml_taste_model = MLTasteModel(str(CSV_PATH), str(MODEL_DIR))
-    logger.info(f"[ML] ML taste model ready - {ml_taste_model.training_stats.get('n_tracks', 0)} tracks, "
-          f"{ml_taste_model.training_stats.get('explained_variance', 0):.1%} variance explained")
-    gc.collect()  # Free memory after loading
-except Exception as e:
-    logger.info(f"[ML] ML taste model not available: {e}")
+if not LIGHT_MODE:
+    try:
+        from app.ml_taste_model import MLTasteModel
+        ml_taste_model = MLTasteModel(str(CSV_PATH), str(MODEL_DIR))
+        logger.info(f"[ML] ML taste model ready - {ml_taste_model.training_stats.get('n_tracks', 0)} tracks, "
+              f"{ml_taste_model.training_stats.get('explained_variance', 0):.1%} variance explained")
+        gc.collect()  # Free memory after loading
+    except Exception as e:
+        logger.info(f"[ML] ML taste model not available: {e}")
+else:
+    logger.info("[ML] LIGHT_MODE: ML features disabled (512MB memory limit)")
 
 # Load mood classifier (rule-based for backward compatibility)
-# In LIGHT_MODE, create empty classifier (endpoints will use ML fallbacks)
+# In LIGHT_MODE, skip entirely - all classification uses fallbacks
+mood_classifier = None
 if not LIGHT_MODE:
     try:
         mood_classifier = MoodClassifier(str(CSV_PATH))
         logger.info(f"[ML] Mood classifier ready with {len(mood_classifier.track_features)} tracks.")
     except Exception as e:
         logger.error(f"[ML] ERROR loading mood classifier: {e}")
-        mood_classifier = MoodClassifier()  # Empty classifier
+        # Create empty classifier - will import the module
+        try:
+            from app.mood_classifier import MoodClassifier as MC
+            mood_classifier = MC()
+        except:
+            pass
 else:
-    logger.info("[ML] LIGHT_MODE: Using empty mood classifier (ML/genre fallbacks available)")
-    mood_classifier = MoodClassifier()  # Empty classifier
+    logger.info("[ML] LIGHT_MODE: Mood classifier disabled")
 
-# Load ML mood model (if trained)
+# Load ML mood model (if trained) - SKIP in LIGHT_MODE (imports sklearn)
 ml_mood_model = None
-try:
-    from ml.model_loader import MoodModelLoader
-    ml_mood_model = MoodModelLoader(str(MODEL_DIR))
-    if ml_mood_model.use_ml:
-        logger.info(f"[ML] ML mood model loaded successfully!")
-    else:
-        logger.info(f"[ML] ML model not found, using rule-based fallback")
-except Exception as e:
-    logger.info(f"[ML] Could not load ML model: {e}, using rule-based fallback")
+if not LIGHT_MODE:
+    try:
+        from ml.model_loader import MoodModelLoader
+        ml_mood_model = MoodModelLoader(str(MODEL_DIR))
+        if ml_mood_model.use_ml:
+            logger.info(f"[ML] ML mood model loaded successfully!")
+        else:
+            logger.info(f"[ML] ML model not found, using rule-based fallback")
+    except Exception as e:
+        logger.info(f"[ML] Could not load ML model: {e}, using rule-based fallback")
+else:
+    logger.info("[ML] LIGHT_MODE: ML mood model disabled")
 
 # -------------------------------------------------------------------
 # Request / Response Models
@@ -284,6 +309,11 @@ class MoodClassifyResponse(BaseModel):
 # -------------------------------------------------------------------
 def compute_similarity(user1_tracks: List[str], user2_tracks: List[str]):
     if taste_model is None:
+        if LIGHT_MODE:
+            raise HTTPException(
+                status_code=503,
+                detail="ML features disabled in LIGHT_MODE (free tier memory limit). Taste matching unavailable.",
+            )
         raise HTTPException(
             status_code=500,
             detail="Track features not loaded. Check SpotifyFeatures.csv.",
@@ -481,7 +511,8 @@ def predict_ml_taste_similarity(payload: MLTasteRequest):
     - Learns underlying patterns in music preferences
     """
     if ml_taste_model is None:
-        raise HTTPException(status_code=503, detail="ML taste model not loaded")
+        detail = "ML features disabled (LIGHT_MODE - free tier memory limit)" if LIGHT_MODE else "ML taste model not loaded"
+        raise HTTPException(status_code=503, detail=detail)
     
     sim = ml_taste_model.similarity(payload.user1_tracks, payload.user2_tracks)
     
@@ -978,14 +1009,15 @@ def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
+        "light_mode": LIGHT_MODE,
         "taste_model_loaded": taste_model is not None,
+        "ml_taste_model_loaded": ml_taste_model is not None,
         "mood_classifier_loaded": mood_classifier is not None,
-        "ml_mood_model_loaded": ml_mood_model is not None and ml_mood_model.use_ml,
-        "genre_mood_fallback": genre_mood_classifier is not None and genre_mood_classifier._loaded,
-        "tracks_loaded": len(mood_classifier.track_features) if mood_classifier else 0,
-        "inference_mode": "ml" if (ml_mood_model and ml_mood_model.use_ml) else "rule_based",
-        "audio_features_required": True,  # Primary method needs audio features
-        "genre_fallback_available": genre_mood_classifier is not None,  # Genre fallback for Spotify API deprecation
+        "ml_mood_model_loaded": ml_mood_model is not None and getattr(ml_mood_model, 'use_ml', False),
+        "genre_mood_fallback": genre_mood_classifier is not None and getattr(genre_mood_classifier, '_loaded', False),
+        "tracks_loaded": len(mood_classifier.track_features) if mood_classifier and hasattr(mood_classifier, 'track_features') else 0,
+        "inference_mode": "light_mode" if LIGHT_MODE else ("ml" if (ml_mood_model and getattr(ml_mood_model, 'use_ml', False)) else "rule_based"),
+        "ml_features_available": not LIGHT_MODE,
     }
 
 
