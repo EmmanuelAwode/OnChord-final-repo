@@ -1,5 +1,6 @@
 # app/main.py
 import logging
+import gc
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,11 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 import numpy as np
 import os
+
+# Deployment mode - skip heavy CSV loading on memory-constrained environments
+LIGHT_MODE = os.environ.get("RENDER", "") == "true" or os.environ.get("LIGHT_MODE", "").lower() == "true"
+if LIGHT_MODE:
+    logger.info("[ML] Running in LIGHT MODE - skipping CSV loading to save memory")
 
 # Load environment variables from .env file
 try:
@@ -75,6 +81,9 @@ DATASET_FILES = [
 
 def find_best_dataset():
     """Find the best available dataset file."""
+    if LIGHT_MODE:
+        return DATA_DIR / "SpotifyFeatures.csv"  # Just return default path, won't be loaded
+    
     best_path = None
     best_size = 0
     
@@ -95,36 +104,48 @@ def find_best_dataset():
     return DATA_DIR / "SpotifyFeatures.csv"
 
 CSV_PATH = find_best_dataset()
-logger.info(f"[ML] Loading dataset from: {CSV_PATH}")
+if not LIGHT_MODE:
+    logger.info(f"[ML] Loading dataset from: {CSV_PATH}")
 
 # -------------------------------------------------------------------
-# Load Artist-to-Genre mapping from SpotifyFeatures.csv
+# Load Artist-to-Genre mapping from SpotifyFeatures.csv (SKIP in LIGHT_MODE)
 # -------------------------------------------------------------------
 ARTIST_GENRE_MAP: Dict[str, List[str]] = {}
-try:
-    import pandas as pd
-    features_path = DATA_DIR / "SpotifyFeatures.csv"
-    if features_path.exists():
-        df = pd.read_csv(features_path, usecols=['artist_name', 'genre'])
-        # Group genres by artist (lowercase for matching)
-        for artist, group in df.groupby('artist_name'):
-            artist_lower = artist.lower().strip()
-            genres = list(group['genre'].unique())
-            ARTIST_GENRE_MAP[artist_lower] = genres
-        logger.info(f"[ML] Loaded artist-genre map: {len(ARTIST_GENRE_MAP)} artists")
-    else:
-        logger.info(f"[ML] SpotifyFeatures.csv not found, artist-genre lookup disabled")
-except Exception as e:
-    logger.info(f"[ML] Could not load artist-genre map: {e}")
+if not LIGHT_MODE:
+    try:
+        import pandas as pd
+        features_path = DATA_DIR / "SpotifyFeatures.csv"
+        if features_path.exists():
+            df = pd.read_csv(features_path, usecols=['artist_name', 'genre'])
+            # Group genres by artist (lowercase for matching)
+            for artist, group in df.groupby('artist_name'):
+                artist_lower = artist.lower().strip()
+                genres = list(group['genre'].unique())
+                ARTIST_GENRE_MAP[artist_lower] = genres
+            logger.info(f"[ML] Loaded artist-genre map: {len(ARTIST_GENRE_MAP)} artists")
+            del df  # Free memory
+            gc.collect()
+        else:
+            logger.info(f"[ML] SpotifyFeatures.csv not found, artist-genre lookup disabled")
+    except Exception as e:
+        logger.info(f"[ML] Could not load artist-genre map: {e}")
+else:
+    logger.info("[ML] LIGHT_MODE: Skipping artist-genre map")
 
-try:
-    taste_model = SpotifyTasteModel(str(CSV_PATH))
-    logger.info(f"[ML] Loaded {len(taste_model.track_features)} track vectors.")
-except Exception as e:
-    logger.error(f"[ML] ERROR loading CSV: {e}")
-    taste_model = None
+# Load taste model (SKIP in LIGHT_MODE - uses pre-trained ML model instead)
+taste_model = None
+if not LIGHT_MODE:
+    try:
+        taste_model = SpotifyTasteModel(str(CSV_PATH))
+        logger.info(f"[ML] Loaded {len(taste_model.track_features)} track vectors.")
+    except Exception as e:
+        logger.error(f"[ML] ERROR loading CSV: {e}")
+        taste_model = None
+else:
+    logger.info("[ML] LIGHT_MODE: Skipping SpotifyTasteModel (using ML model instead)")
 
 # Load ML-based taste model (uses TruncatedSVD for learned embeddings)
+# This SHOULD work in LIGHT_MODE because it loads pre-trained models
 ml_taste_model = None
 MODEL_DIR = Path(__file__).parent.parent / "models"
 try:
@@ -132,15 +153,21 @@ try:
     ml_taste_model = MLTasteModel(str(CSV_PATH), str(MODEL_DIR))
     logger.info(f"[ML] ML taste model ready - {ml_taste_model.training_stats.get('n_tracks', 0)} tracks, "
           f"{ml_taste_model.training_stats.get('explained_variance', 0):.1%} variance explained")
+    gc.collect()  # Free memory after loading
 except Exception as e:
     logger.info(f"[ML] ML taste model not available: {e}")
 
 # Load mood classifier (rule-based for backward compatibility)
-try:
-    mood_classifier = MoodClassifier(str(CSV_PATH))
-    logger.info(f"[ML] Mood classifier ready with {len(mood_classifier.track_features)} tracks.")
-except Exception as e:
-    logger.error(f"[ML] ERROR loading mood classifier: {e}")
+# In LIGHT_MODE, create empty classifier (endpoints will use ML fallbacks)
+if not LIGHT_MODE:
+    try:
+        mood_classifier = MoodClassifier(str(CSV_PATH))
+        logger.info(f"[ML] Mood classifier ready with {len(mood_classifier.track_features)} tracks.")
+    except Exception as e:
+        logger.error(f"[ML] ERROR loading mood classifier: {e}")
+        mood_classifier = MoodClassifier()  # Empty classifier
+else:
+    logger.info("[ML] LIGHT_MODE: Using empty mood classifier (ML/genre fallbacks available)")
     mood_classifier = MoodClassifier()  # Empty classifier
 
 # Load ML mood model (if trained)
