@@ -36,7 +36,6 @@ import joblib
 from pathlib import Path
 from sklearn.decomposition import TruncatedSVD, PCA
 from sklearn.preprocessing import StandardScaler
-from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import Dict, List, Optional, Tuple
 import json
@@ -79,7 +78,6 @@ class MLTasteModel:
         # ML Components (learned from data)
         self.scaler: Optional[StandardScaler] = None
         self.svd: Optional[TruncatedSVD] = None
-        self.nn_index: Optional[NearestNeighbors] = None
         
         # Data storage
         self.track_features: Dict[str, np.ndarray] = {}  # track_id -> raw features
@@ -196,10 +194,6 @@ class MLTasteModel:
         # Step 3: Store embeddings for fast lookup
         for tid, embedding in zip(track_ids, X_embedded):
             self.track_embeddings[tid] = embedding
-        
-        # Step 4: Build nearest neighbor index (for fast similarity queries)
-        self.nn_index = NearestNeighbors(n_neighbors=50, metric='cosine', algorithm='brute')
-        self.nn_index.fit(X_embedded)
         
         # Training stats
         self.training_stats = {
