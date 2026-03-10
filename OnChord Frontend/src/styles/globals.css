@@ -568,6 +568,17 @@ div, li, td, th {
 /* Frequency bars */
 .frequency-bar {
   background: linear-gradient(to top, #A855F7, #EC4899);
+}
+
+/* Broken image fallback - shows gradient when image fails to load */
+img:not([src]),
+img[src=""] {
+  background: linear-gradient(135deg, var(--muted) 0%, var(--card) 100%);
+  min-height: 48px;
+  min-width: 48px;
+}
+.frequency-bar {
+  background: linear-gradient(to top, #A855F7, #EC4899);
   animation: beat 0.8s ease-in-out infinite;
 }
 

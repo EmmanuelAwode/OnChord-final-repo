@@ -1,0 +1,59 @@
+# Render Blueprint - Deploy OnChord with one click
+# https://render.com/docs/infrastructure-as-code
+
+services:
+  # ============================================
+  # ML Service (Python FastAPI)
+  # ============================================
+  - type: web
+    name: onchord-ml-service
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: ml-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: LASTFM_API_KEY
+        sync: false  # Set manually in Render dashboard
+    autoDeploy: true
+
+  # ============================================
+  # Frontend (React/Vite Static Site)
+  # ============================================
+  - type: web
+    name: onchord-frontend
+    runtime: static
+    region: oregon
+    plan: free
+    rootDir: OnChord Frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # These are build-time variables (VITE_ prefix)
+      - key: VITE_SUPABASE_URL
+        sync: false  # Set manually
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false  # Set manually
+      - key: VITE_SPOTIFY_CLIENT_ID
+        sync: false  # Set manually
+      - key: VITE_SPOTIFY_REDIRECT_URI
+        sync: false  # Set manually - use your Render frontend URL
+      - key: VITE_TICKETMASTER_API_KEY
+        sync: false  # Set manually
+      - key: VITE_ML_SERVICE_URL
+        sync: false  # Set to your ML service URL from Render
+    autoDeploy: true

@@ -75,3 +75,32 @@ WHERE album_cover = 'https://i.scdn.co/image/ab67616d0000b273419ccce48c6d1b1d5b7
 UPDATE reviews 
 SET album_cover = 'https://i.scdn.co/image/ab67616d0000b2732e14394fdd25e7e0c1f5aa97'
 WHERE album_cover = 'https://i.scdn.co/image/ab67616d0000b273cdb645498cd3b3aa2e9a01de';
+
+-- Additional fixes added for remaining fake hashes
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%f7b7b7b7a6a6a6a5a5a5a4a4%'; -- Nothing Was the Same
+
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%a0d0d0d0b1b1b1c2c2c2d3d3%'; -- KOD
+
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%95e758f05a9d82d5edf9858e%'; -- Reign in Blood
+
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%7f0b8a7bda8d8dc6e8fa9f26%'; -- Rust in Peace
+
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%8b70edb65c0d3a3f7e9b5b42%'; -- Vulgar Display
+
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%e17011b877cd5c3d6f469c4a%'; -- Music for Airports
+
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%4b8c9c1c4c556c7e7c1c4a4a%'; -- Felt
+
+UPDATE reviews SET album_cover = 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%1b40544f8ee8e8ac7bad9f88%'; -- Selected Ambient Works
+
+-- Fix activities table too
+UPDATE activities SET album_cover = 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&h=300&fit=crop'
+WHERE album_cover LIKE '%cdb645498cd3b3aa2e9a01de%'; -- To Pimp a Butterfly

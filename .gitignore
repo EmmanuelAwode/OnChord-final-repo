@@ -48,9 +48,10 @@ ml-service/data/*.parquet
 ml-service/data/*.json
 !ml-service/data/.gitignore
 
-# Trained models (large files - don't track)
-ml-service/models/*.joblib
-ml-service/models/*.pkl
+# Trained models - KEEP these for deployment!
+# Only ignore very large experimental files
+# ml-service/models/*.joblib  # UNCOMMENT to exclude models
+# ml-service/models/*.pkl
 
 # -------------------------------------------
 # IDE / Editor

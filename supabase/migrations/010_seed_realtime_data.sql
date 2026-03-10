@@ -12,7 +12,7 @@ VALUES
 INSERT INTO activities (user_id, user_name, user_avatar, type, action, album_title, album_artist, album_cover, rating, created_at)
 VALUES 
   (gen_random_uuid(), 'Sarah Johnson', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400', 'review', 'reviewed', 'Good Kid, M.A.A.D City', 'Kendrick Lamar', 'https://i.scdn.co/image/ab67616d0000b273d28d2ebdedb220e479743797', 5, now() - interval '2 minutes'),
-  (gen_random_uuid(), 'Michael Chen', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400', 'like', 'liked', 'To Pimp a Butterfly', 'Kendrick Lamar', 'https://i.scdn.co/image/ab67616d0000b273cdb645498cd3b3aa2e9a01de', null, now() - interval '15 minutes'),
+  (gen_random_uuid(), 'Michael Chen', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400', 'like', 'liked', 'To Pimp a Butterfly', 'Kendrick Lamar', 'https://i.scdn.co/image/ab67616d0000b273cdb10bfc3c0a409ffb9ada6b', null, now() - interval '15 minutes'),
   (gen_random_uuid(), 'Emma Davis', 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400', 'playlist_add', 'added a track to their playlist', 'DAMN.', 'Kendrick Lamar', 'https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699', null, now() - interval '1 hour');
 
 -- Insert sample playlist (using generated UUIDs for testing)
