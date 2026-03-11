@@ -63,7 +63,7 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
         options: {
           redirectTo: window.location.origin,
           scopes:
-            "user-read-email user-read-private user-top-read user-read-recently-played",
+            "user-read-email user-read-private user-top-read user-read-recently-played playlist-read-private playlist-read-collaborative",
           skipBrowserRedirect: true,
           queryParams: {
             prompt: "consent",
