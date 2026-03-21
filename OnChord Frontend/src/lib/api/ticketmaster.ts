@@ -1,6 +1,8 @@
 // Ticketmaster API integration for fetching live events
 // Uses Supabase Edge Function proxy to avoid CORS issues
 
+import { supabase } from "../supabaseClient";
+
 const TICKETMASTER_API_KEY = import.meta.env.VITE_TICKETMASTER_API_KEY;
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -12,10 +14,23 @@ const TICKETMASTER_PROXY_URL = SUPABASE_URL
   : '/api/ticketmaster/discovery/v2';
 
 // Headers for Supabase Edge Function calls
-const getSupabaseHeaders = () => ({
-  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-  'apikey': SUPABASE_ANON_KEY || '',
-});
+const getSupabaseHeaders = async (): Promise<Record<string, string>> => {
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_ANON_KEY || "",
+  };
+
+  // Use the user's access token when available; sending anon key as bearer can be rejected.
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) {
+      headers.Authorization = `Bearer ${data.session.access_token}`;
+    }
+  } catch (error) {
+    console.warn("Could not read Supabase session for function auth", error);
+  }
+
+  return headers;
+};
 
 // Queue-based rate limiter for Ticketmaster API (max 5 requests per second)
 // Uses a proper queue to ensure concurrent calls don't slip through
@@ -183,7 +198,8 @@ export async function searchEvents(
       ? `${TICKETMASTER_PROXY_URL}?${params.toString()}`
       : `/api/ticketmaster/discovery/v2/events.json?${params.toString()}`;
 
-    const response = await fetch(url, SUPABASE_URL ? { headers: getSupabaseHeaders() } : undefined);
+    const headers = SUPABASE_URL ? await getSupabaseHeaders() : undefined;
+    const response = await fetch(url, SUPABASE_URL ? { headers } : undefined);
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -211,8 +227,8 @@ export async function getArtistEvents(
     countryCode?: string;
   } = {}
 ): Promise<TicketmasterEvent[]> {
-  if (!TICKETMASTER_API_KEY) {
-    console.warn('Ticketmaster API key not found');
+  if (!SUPABASE_URL && !TICKETMASTER_API_KEY) {
+    console.warn('Ticketmaster API not configured');
     return [];
   }
 
@@ -303,7 +319,8 @@ export async function getEventsNearLocation(
       ? `${TICKETMASTER_PROXY_URL}?${params.toString()}`
       : `/api/ticketmaster/discovery/v2/events.json?${params.toString()}`;
 
-    const response = await fetch(url, SUPABASE_URL ? { headers: getSupabaseHeaders() } : undefined);
+    const headers = SUPABASE_URL ? await getSupabaseHeaders() : undefined;
+    const response = await fetch(url, SUPABASE_URL ? { headers } : undefined);
 
     if (!response.ok) {
       throw new Error(`Ticketmaster API error: ${response.statusText}`);
@@ -369,7 +386,8 @@ export async function getHipHopEvents(
       ? `${TICKETMASTER_PROXY_URL}?${params.toString()}`
       : `/api/ticketmaster/discovery/v2/events.json?${params.toString()}`;
 
-    const response = await fetch(url, SUPABASE_URL ? { headers: getSupabaseHeaders() } : undefined);
+    const headers = SUPABASE_URL ? await getSupabaseHeaders() : undefined;
+    const response = await fetch(url, SUPABASE_URL ? { headers } : undefined);
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -382,6 +400,48 @@ export async function getHipHopEvents(
     const totalPages = data.page?.totalPages || 1;
     const hasMore = currentPage < totalPages - 1;
     const events = data._embedded?.events || [];
+
+    // Fallback: if strict genre filters return nothing, broaden to all music events.
+    if (events.length === 0 && !options.city && !options.stateCode && !options.countryCode) {
+      const fallbackParams = new URLSearchParams({
+        segmentId: 'KZFzniwnSyZfZ7v7nJ',
+        size: (options.size || 50).toString(),
+        page: (options.page || 0).toString(),
+        sort: 'date,asc',
+        startDateTime,
+      });
+
+      if (SUPABASE_URL) {
+        fallbackParams.append('endpoint', '/events.json');
+      } else {
+        fallbackParams.append('apikey', TICKETMASTER_API_KEY!);
+      }
+
+      await rateLimiter.throttle();
+
+      const fallbackUrl = SUPABASE_URL
+        ? `${TICKETMASTER_PROXY_URL}?${fallbackParams.toString()}`
+        : `/api/ticketmaster/discovery/v2/events.json?${fallbackParams.toString()}`;
+
+      const fallbackHeaders = SUPABASE_URL ? await getSupabaseHeaders() : undefined;
+      const fallbackResponse = await fetch(
+        fallbackUrl,
+        SUPABASE_URL ? { headers: fallbackHeaders } : undefined
+      );
+
+      if (fallbackResponse.ok) {
+        const fallbackData = await fallbackResponse.json();
+        const fallbackEvents = fallbackData._embedded?.events || [];
+        const fallbackCurrentPage = fallbackData.page?.number || 0;
+        const fallbackTotalPages = fallbackData.page?.totalPages || 1;
+
+        return {
+          events: fallbackEvents.map((event: TicketmasterAPIEvent) => transformEvent(event)),
+          hasMore: fallbackCurrentPage < fallbackTotalPages - 1,
+          totalPages: fallbackTotalPages,
+        };
+      }
+    }
 
     return {
       events: events.map((event: TicketmasterAPIEvent) => transformEvent(event)),
@@ -532,7 +592,8 @@ export async function getEventById(eventId: string): Promise<TicketmasterEvent |
       url = `/api/ticketmaster/discovery/v2/events/${eventId}.json?apikey=${TICKETMASTER_API_KEY}`;
     }
 
-    const response = await fetch(url, SUPABASE_URL ? { headers: getSupabaseHeaders() } : undefined);
+    const headers = SUPABASE_URL ? await getSupabaseHeaders() : undefined;
+    const response = await fetch(url, SUPABASE_URL ? { headers } : undefined);
 
     if (!response.ok) {
       console.error('Failed to fetch event:', response.statusText);

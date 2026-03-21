@@ -1,6 +1,7 @@
 // Real-time notifications hook using Supabase Realtime
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
+import { formatDateForDisplay } from './localeFormatting';
 
 export interface Notification {
   id: string;
@@ -188,7 +189,7 @@ export function useRealtimeNotifications() {
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
     if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
     if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
-    return date.toLocaleDateString();
+    return formatDateForDisplay(date, 'short');
   }
 
   function showBrowserNotification(notification: Notification) {

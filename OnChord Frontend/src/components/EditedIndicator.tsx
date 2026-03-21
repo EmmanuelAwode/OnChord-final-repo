@@ -1,4 +1,5 @@
 import { Edit3 } from "lucide-react";
+import { formatDateForDisplay } from "../lib/localeFormatting";
 
 interface EditedIndicatorProps {
   isEdited?: boolean;
@@ -22,7 +23,7 @@ export function EditedIndicator({ isEdited, editedAt, className = "" }: EditedIn
     if (diffHours < 24) return `Edited ${diffHours}h ago`;
     if (diffDays === 1) return "Edited 1d ago";
     if (diffDays < 7) return `Edited ${diffDays}d ago`;
-    return `Edited ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    return `Edited ${formatDateForDisplay(date, 'monthDay')}`;
   };
 
   return (

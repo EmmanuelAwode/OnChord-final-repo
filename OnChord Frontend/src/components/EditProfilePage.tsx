@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useProfile } from "../lib/useProfile";
 import { isUsernameAvailable } from "../lib/api/profiles";
+import { getSpotifyConnection, disconnectSpotify, initiateSpotifyLogin } from "../lib/api/spotify";
 import { toast } from "sonner";
 import { supabase } from "../lib/supabaseClient";
 
@@ -37,7 +38,9 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
   const [avatarUrl, setAvatarUrl] = useState("");
   const [location, setLocation] = useState("San Francisco, CA");
   const [website, setWebsite] = useState("onchord.music");
-  const [spotifyConnected, setSpotifyConnected] = useState(true);
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
+  const [isLoadingSpotifyConnection, setIsLoadingSpotifyConnection] = useState(true);
+  const [isUpdatingSpotifyConnection, setIsUpdatingSpotifyConnection] = useState(false);
   const [appleMusicConnected, setAppleMusicConnected] = useState(false);
   const [publicProfile, setPublicProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -95,6 +98,63 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  // Load real Spotify connection state
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadSpotifyState() {
+      try {
+        const connection = await getSpotifyConnection();
+        if (mounted) {
+          setSpotifyConnected(!!connection);
+        }
+      } catch (error) {
+        console.error("Failed to load Spotify connection state:", error);
+        if (mounted) {
+          setSpotifyConnected(false);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingSpotifyConnection(false);
+        }
+      }
+    }
+
+    loadSpotifyState();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleDisconnectSpotify = async () => {
+    if (isUpdatingSpotifyConnection) return;
+
+    setIsUpdatingSpotifyConnection(true);
+    try {
+      await disconnectSpotify();
+      setSpotifyConnected(false);
+      toast.success("Spotify disconnected");
+    } catch (error) {
+      console.error("Failed to disconnect Spotify:", error);
+      toast.error("Failed to disconnect Spotify");
+    } finally {
+      setIsUpdatingSpotifyConnection(false);
+    }
+  };
+
+  const handleConnectSpotify = async () => {
+    if (isUpdatingSpotifyConnection) return;
+
+    setIsUpdatingSpotifyConnection(true);
+    try {
+      await initiateSpotifyLogin();
+    } catch (error) {
+      console.error("Failed to start Spotify connection:", error);
+      toast.error("Failed to connect Spotify");
+      setIsUpdatingSpotifyConnection(false);
+    }
   };
 
   // Check username availability
@@ -325,7 +385,11 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
               <div>
                 <p className="text-foreground font-medium">Spotify</p>
                 <p className="text-xs text-muted-foreground">
-                  {spotifyConnected ? "Connected" : "Not connected"}
+                  {isLoadingSpotifyConnection
+                    ? "Loading..."
+                    : spotifyConnected
+                    ? "Connected"
+                    : "Not connected"}
                 </p>
               </div>
             </div>
@@ -335,19 +399,21 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
                 <Button 
                   variant="outline" 
                   size="sm"
-                  onClick={() => setSpotifyConnected(false)}
+                  onClick={handleDisconnectSpotify}
+                  disabled={isLoadingSpotifyConnection || isUpdatingSpotifyConnection}
                   className="border-destructive text-destructive hover:bg-destructive hover:text-white"
                 >
-                  Disconnect
+                  {isUpdatingSpotifyConnection ? "Disconnecting..." : "Disconnect"}
                 </Button>
               </div>
             ) : (
               <Button 
                 size="sm"
-                onClick={() => setSpotifyConnected(true)}
+                onClick={handleConnectSpotify}
+                disabled={isLoadingSpotifyConnection || isUpdatingSpotifyConnection}
                 className="bg-[#1DB954] hover:bg-[#1aa34a] text-white"
               >
-                Connect
+                {isUpdatingSpotifyConnection ? "Connecting..." : "Connect"}
               </Button>
             )}
           </div>

@@ -188,80 +188,71 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
       {canGoBack && <BackButton onClick={onBack || (() => onNavigate?.("home"))} label="Back" />}
 
       {/* Profile Header */}
-      <Card className="p-6 bg-card border-border">
-        <div className="flex flex-col md:flex-row gap-6">
-          {displayAvatar ? (
-            <img
-              src={displayAvatar}
-              alt={displayName}
-              className="w-24 h-24 rounded-full object-cover flex-shrink-0"
-            />
-          ) : (
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
-              <span className="text-primary text-4xl font-medium">
-                {displayName.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          )}
-          <div className="flex-1">
-            <div className="flex items-start justify-between mb-2">
-              <div>
-                <h2 className="text-2xl text-foreground">{displayName}</h2>
-                {displayUsername && (
-                  <p className="text-muted-foreground">{displayUsername}</p>
-                )}
-                {followsYou && !isOwnProfile && (
-                  <Badge variant="outline" className="border-secondary/50 text-secondary text-xs mt-1">
-                    Follows you
-                  </Badge>
+      <Card className="p-4 md:p-6 bg-card border-border">
+        <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
+          <div className="flex items-start gap-4 sm:contents">
+            {displayAvatar ? (
+              <img
+                src={displayAvatar}
+                alt={displayName}
+                className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover flex-shrink-0"
+              />
+            ) : (
+              <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-primary text-3xl md:text-4xl font-medium">
+                  {displayName.charAt(0).toUpperCase()}
+                </span>
+              </div>
+            )}
+            {/* Name + button inline with avatar on mobile */}
+            <div className="flex-1 sm:hidden">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xl text-foreground font-semibold">{displayName}</h2>
+                  {displayUsername && <p className="text-sm text-muted-foreground">{displayUsername}</p>}
+                  {followsYou && !isOwnProfile && (
+                    <Badge variant="outline" className="border-secondary/50 text-secondary text-xs mt-1">Follows you</Badge>
+                  )}
+                </div>
+                {isOwnProfile ? (
+                  <Button variant="outline" size="sm" className="border-border ml-2 flex-shrink-0" onClick={() => onNavigate?.("edit-profile")}>
+                    Edit
+                  </Button>
+                ) : (
+                  <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" className="flex-shrink-0 ml-2" disabled={followLoading}>
+                    {isCurrentlyFollowing ? <><UserMinus className="w-3 h-3 mr-1" />Unfollow</> : <><UserPlus className="w-3 h-3 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
+                  </Button>
                 )}
               </div>
-
-              {/* Follow/Edit Button */}
+            </div>
+          </div>
+          <div className="flex-1">
+            {/* Name + button on larger screens */}
+            <div className="hidden sm:flex items-start justify-between mb-2">
+              <div>
+                <h2 className="text-2xl text-foreground">{displayName}</h2>
+                {displayUsername && <p className="text-muted-foreground">{displayUsername}</p>}
+                {followsYou && !isOwnProfile && (
+                  <Badge variant="outline" className="border-secondary/50 text-secondary text-xs mt-1">Follows you</Badge>
+                )}
+              </div>
               {isOwnProfile ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="border-border hover:border-primary hover:text-primary"
-                  onClick={() => onNavigate?.("edit-profile")}
-                >
-                  Edit Profile
-                </Button>
+                <Button variant="outline" size="sm" className="border-border hover:border-primary hover:text-primary" onClick={() => onNavigate?.("edit-profile")}>Edit Profile</Button>
               ) : (
-                <Button
-                  onClick={handleToggleFollow}
-                  variant={isCurrentlyFollowing ? "outline" : "default"}
-                  size="sm"
-                  className="flex-shrink-0"
-                  disabled={followLoading}
-                >
-                  {isCurrentlyFollowing ? (
-                    <>
-                      <UserMinus className="w-4 h-4 mr-1" />
-                      Unfollow
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="w-4 h-4 mr-1" />
-                      {followsYou ? "Follow Back" : "Follow"}
-                    </>
-                  )}
+                <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" className="flex-shrink-0" disabled={followLoading}>
+                  {isCurrentlyFollowing ? <><UserMinus className="w-4 h-4 mr-1" />Unfollow</> : <><UserPlus className="w-4 h-4 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
                 </Button>
               )}
             </div>
-
-            {displayBio && (
-              <p className="text-foreground mb-4">{displayBio}</p>
-            )}
-
-            <div className="flex gap-6">
+            {displayBio && <p className="text-foreground text-sm md:text-base mb-4">{displayBio}</p>}
+            <div className="flex gap-4 md:gap-6">
               <div>
-                <p className="text-foreground">{followersCount}</p>
-                <p className="text-sm text-muted-foreground">Followers</p>
+                <p className="text-foreground font-medium">{followersCount}</p>
+                <p className="text-xs md:text-sm text-muted-foreground">Followers</p>
               </div>
               <div>
-                <p className="text-foreground">{followingCount}</p>
-                <p className="text-sm text-muted-foreground">Following</p>
+                <p className="text-foreground font-medium">{followingCount}</p>
+                <p className="text-xs md:text-sm text-muted-foreground">Following</p>
               </div>
             </div>
           </div>

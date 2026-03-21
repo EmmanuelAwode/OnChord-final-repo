@@ -13,6 +13,7 @@ import { useSupabaseLikes } from "../lib/useSupabaseLikes";
 import { BackButton } from "./BackButton";
 import { getFriendsReviews } from "../lib/api/reviews";
 import { supabase } from "../lib/supabaseClient";
+import { formatDateForDisplay } from "../lib/localeFormatting";
 
 interface FriendsReviewsPageProps {
   onNavigate?: (page: string) => void;
@@ -306,11 +307,7 @@ export function FriendsReviewsPage({ onNavigate, onOpenAlbum, onBack, canGoBack 
                       {selectedReview.date && (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <CalendarIcon className="w-4 h-4" />
-                          {new Date(selectedReview.date).toLocaleDateString('en-US', {
-                            month: 'long',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })}
+                          {formatDateForDisplay(new Date(selectedReview.date), 'full')}
                         </div>
                       )}
                     </div>

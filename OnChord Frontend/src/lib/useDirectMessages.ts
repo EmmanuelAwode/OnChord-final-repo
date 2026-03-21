@@ -79,7 +79,7 @@ export function useDirectMessages(currentUserId: string | null) {
           .from("profiles")
           .select("id, username, avatar_url, display_name")
           .eq("id", otherUserId)
-          .single();
+          .maybeSingle();
         
         transformedConvos.push({
           id: c.id,
@@ -110,7 +110,7 @@ export function useDirectMessages(currentUserId: string | null) {
           .eq("conversation_id", convo.id)
           .order("created_at", { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
         
         if (lastMsg) {
           convo.last_message = lastMsg;
@@ -148,7 +148,25 @@ export function useDirectMessages(currentUserId: string | null) {
           user2_id: otherUserId,
         });
 
-      if (error) throw error;
+      if (error) {
+        // Conflict can happen under concurrent creates; fall back to lookup.
+        if (error.code === "23505" || error.message?.includes("409")) {
+          const { data: existing } = await supabase
+            .from("conversations")
+            .select("id")
+            .or(
+              `and(participant_1.eq.${currentUserId},participant_2.eq.${otherUserId}),and(participant_1.eq.${otherUserId},participant_2.eq.${currentUserId})`
+            )
+            .maybeSingle();
+
+          if (existing?.id) {
+            await fetchConversations();
+            return existing.id;
+          }
+        }
+
+        throw error;
+      }
       
       // Refresh conversations list
       await fetchConversations();
@@ -214,6 +232,53 @@ export function useDirectMessages(currentUserId: string | null) {
         .from("conversations")
         .update({ last_message_at: new Date().toISOString() })
         .eq("id", conversationId);
+
+      // Create a notification for the recipient so it appears in Notifications panel.
+      try {
+        const { data: convo } = await supabase
+          .from("conversations")
+          .select("participant_1, participant_2")
+          .eq("id", conversationId)
+          .single();
+
+        if (convo) {
+          const recipientId = convo.participant_1 === currentUserId ? convo.participant_2 : convo.participant_1;
+
+          if (recipientId && recipientId !== currentUserId) {
+            const { data: senderProfile } = await supabase
+              .from("profiles")
+              .select("display_name, username, avatar_url")
+              .eq("id", currentUserId)
+              .maybeSingle();
+
+            const senderName = senderProfile?.display_name || senderProfile?.username || "Someone";
+            const messagePreview =
+              messageType === "text"
+                ? (content?.trim() || "sent you a message")
+                : messageType === "image"
+                ? "sent you an image"
+                : messageType === "gif"
+                ? "sent you a GIF"
+                : messageType === "track"
+                ? "shared a track with you"
+                : "sent you a message";
+
+            await supabase.from("notifications").insert({
+              user_id: recipientId,
+              type: "mention",
+              title: "New message",
+              message: `${senderName} ${messagePreview}`,
+              action_user_id: currentUserId,
+              action_user_name: senderName,
+              action_user_avatar: senderProfile?.avatar_url || null,
+              is_read: false,
+            });
+          }
+        }
+      } catch (notifyErr) {
+        // Notification creation should not block sending the message.
+        console.error("Failed to create message notification:", notifyErr);
+      }
 
       return data;
     } catch (err: any) {

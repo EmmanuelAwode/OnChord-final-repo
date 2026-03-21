@@ -2,6 +2,7 @@
 import { supabase } from "../supabaseClient";
 import type { Review } from "../useUserInteractions";
 import { fixSpotifyImageUrl } from "../../components/ui/utils";
+import { formatDateForDisplay } from "../localeFormatting";
 
 type DbReview = {
   id: string;
@@ -24,6 +25,7 @@ type DbReview = {
   tags: any; // jsonb
 
   is_public: boolean | null;
+  visibility: "public" | "friends" | "private" | null;
 
   mood: string | null;
   where_listened: string | null;
@@ -69,6 +71,7 @@ function mapDbToUi(r: DbReview): Review {
     favoriteTrack: r.favorite_track ?? undefined,
 
     isPublic: !!r.is_public,
+    visibility: (r.visibility ?? (r.is_public ? "public" : "private")) as "public" | "friends" | "private",
     isEdited: updated !== created,
     editedAt: updated !== created ? updated : undefined,
   };
@@ -87,7 +90,7 @@ function getRelativeTime(date: Date): string {
   if (diffDays === 1) return "1 day ago";
   if (diffDays < 7) return `${diffDays} days ago`;
   if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatDateForDisplay(date, "full");
 }
 
 /**
@@ -114,7 +117,7 @@ export async function getPublicReviews(limit = 50): Promise<Review[]> {
   const { data, error } = await supabase
     .from("reviews")
     .select("*")
-    .eq("is_public", true)
+    .in("visibility", ["public", "friends"])
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -142,7 +145,7 @@ export async function getFriendsReviews(): Promise<Review[]> {
     .from("reviews")
     .select("*")
     .in("uid", followedIds)
-    .eq("is_public", true)
+    .eq("visibility", "public")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -178,27 +181,49 @@ export async function getAlbumReviews(albumId: string): Promise<Review[]> {
     .from("reviews")
     .select("*")
     .eq("album_id", albumId)
-    .eq("is_public", true)
+    .eq("visibility", "public")
     .order("created_at", { ascending: false });
 
   if (pubErr) throw pubErr;
 
   let allReviews = (publicData as DbReview[]).map(mapDbToUi);
 
-  // Also fetch the current user's private reviews for this album
   if (userId) {
-    const { data: privateData } = await supabase
+    // Friends-only reviews from people the current user follows
+    const { data: followsData } = await supabase
+      .from("follows")
+      .select("following_id")
+      .eq("follower_id", userId);
+    const followedIds = (followsData || []).map((f: any) => f.following_id);
+
+    if (followedIds.length > 0) {
+      const { data: friendsData } = await supabase
+        .from("reviews")
+        .select("*")
+        .eq("album_id", albumId)
+        .eq("visibility", "friends")
+        .in("uid", followedIds)
+        .order("created_at", { ascending: false });
+
+      if (friendsData && friendsData.length > 0) {
+        const existingIds = new Set(allReviews.map((r) => r.id));
+        for (const r of (friendsData as DbReview[]).map(mapDbToUi)) {
+          if (!existingIds.has(r.id)) allReviews.push(r);
+        }
+      }
+    }
+
+    // Always include all of the current user's own reviews for this album
+    const { data: ownData } = await supabase
       .from("reviews")
       .select("*")
       .eq("album_id", albumId)
       .eq("uid", userId)
-      .eq("is_public", false);
+      .in("visibility", ["friends", "private"]);
 
-    if (privateData && privateData.length > 0) {
-      const privateReviews = (privateData as DbReview[]).map(mapDbToUi);
-      // Merge, avoiding duplicates
+    if (ownData && ownData.length > 0) {
       const existingIds = new Set(allReviews.map((r) => r.id));
-      for (const r of privateReviews) {
+      for (const r of (ownData as DbReview[]).map(mapDbToUi)) {
         if (!existingIds.has(r.id)) allReviews.push(r);
       }
     }
@@ -241,6 +266,7 @@ export async function createReview(
     content: review.content ?? null,
     tags: review.tags ?? [],
 
+    visibility: review.visibility ?? (review.isPublic ? "public" : "private"),
     is_public: review.isPublic,
 
     mood: review.mood ?? null,
@@ -278,7 +304,12 @@ export async function updateReviewApi(
   if (updates.content !== undefined) patch.content = updates.content;
   if (updates.tags !== undefined) patch.tags = updates.tags;
 
-  if (updates.isPublic !== undefined) patch.is_public = updates.isPublic;
+  if (updates.visibility !== undefined) {
+    patch.visibility = updates.visibility;
+    patch.is_public = updates.visibility !== "private";
+  } else if (updates.isPublic !== undefined) {
+    patch.is_public = updates.isPublic;
+  }
 
   if (updates.mood !== undefined) patch.mood = updates.mood ?? null;
   if (updates.whereListened !== undefined) patch.where_listened = updates.whereListened ?? null;

@@ -59,7 +59,7 @@ export function ReviewCreationModal({
   const [selectedMood, setSelectedMood] = useState("");
   const [selectedContext, setSelectedContext] = useState("");
   const [favoriteTrack, setFavoriteTrack] = useState("");
-  const [visibility, setVisibility] = useState("public");
+  const [visibility, setVisibility] = useState<"public" | "friends" | "private">("public");
 
   useEffect(() => {
     if (editMode && existingReview) {
@@ -68,7 +68,7 @@ export function ReviewCreationModal({
       setSelectedMood(existingReview.mood || "");
       setSelectedContext(existingReview.listeningContext || "");
       setFavoriteTrack(existingReview.favoriteTrack || "");
-      setVisibility(existingReview.visibility || "public");
+      setVisibility((existingReview.visibility as "public" | "friends" | "private") || "public");
     }
   }, [editMode, existingReview]);
 
@@ -271,7 +271,7 @@ export function ReviewCreationModal({
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => setVisibility(option.value)}
+                    onClick={() => setVisibility(option.value as "public" | "friends" | "private")}
                     className={`
                       relative p-4 rounded-lg border-2 transition-all
                       ${isSelected 

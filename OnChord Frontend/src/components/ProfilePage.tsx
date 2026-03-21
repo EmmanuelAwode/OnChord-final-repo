@@ -94,23 +94,43 @@ export function ProfilePage({ username, onNavigate, onOpenAlbum, onBack, canGoBa
     <div className="space-y-6">
       {canGoBack && <BackButton onClick={onBack || (() => onNavigate?.("home"))} label="Back" />}
       {/* Profile Header */}
-      <Card className="p-6 bg-card border-border">
-        <div className="flex flex-col md:flex-row gap-6">
-          {displayAvatar ? (
-            <img 
-              src={displayAvatar} 
-              alt={displayName}
-              className="w-24 h-24 rounded-full object-cover flex-shrink-0"
-            />
-          ) : (
-            <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-              <span className="text-primary text-4xl font-medium">
-                {displayName.charAt(0).toUpperCase()}
-              </span>
+      <Card className="p-4 md:p-6 bg-card border-border">
+        <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
+          <div className="flex items-start gap-4 sm:contents">
+            {displayAvatar ? (
+              <img 
+                src={displayAvatar} 
+                alt={displayName}
+                className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover flex-shrink-0"
+              />
+            ) : (
+              <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-primary text-3xl md:text-4xl font-medium">
+                  {displayName.charAt(0).toUpperCase()}
+                </span>
+              </div>
+            )}
+            {/* Name + edit button on mobile (shown inline with avatar) */}
+            <div className="flex-1 sm:hidden">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xl text-foreground font-semibold">{displayName}</h2>
+                  <p className="text-sm text-muted-foreground">{displayUsername}</p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="border-border hover:border-primary hover:text-primary ml-2"
+                  onClick={() => onNavigate?.("edit-profile")}
+                >
+                  <Edit className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
-          )}
+          </div>
           <div className="flex-1">
-            <div className="flex items-start justify-between mb-2">
+            {/* Name + edit button on larger screens */}
+            <div className="hidden sm:flex items-start justify-between mb-2">
               <div>
                 <h2 className="text-2xl text-foreground">{displayName}</h2>
                 <p className="text-muted-foreground">{displayUsername}</p>
@@ -125,19 +145,19 @@ export function ProfilePage({ username, onNavigate, onOpenAlbum, onBack, canGoBa
                 Edit Profile
               </Button>
             </div>
-            <p className="text-foreground mb-4">{displayBio}</p>
-            <div className="flex gap-6">
+            <p className="text-foreground text-sm md:text-base mb-4">{displayBio}</p>
+            <div className="flex gap-4 md:gap-6">
               <div>
-                <p className="text-foreground">{userReviews.length}</p>
-                <p className="text-sm text-muted-foreground">Reviews</p>
+                <p className="text-foreground font-medium">{userReviews.length}</p>
+                <p className="text-xs md:text-sm text-muted-foreground">Reviews</p>
               </div>
               <div>
-                <p className="text-foreground">{userLists.length}</p>
-                <p className="text-sm text-muted-foreground">Lists</p>
+                <p className="text-foreground font-medium">{userLists.length}</p>
+                <p className="text-xs md:text-sm text-muted-foreground">Lists</p>
               </div>
               <div>
-                <p className="text-foreground">{followersCount}</p>
-                <p className="text-sm text-muted-foreground">Followers</p>
+                <p className="text-foreground font-medium">{followersCount}</p>
+                <p className="text-xs md:text-sm text-muted-foreground">Followers</p>
               </div>
             </div>
           </div>

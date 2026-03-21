@@ -1,6 +1,9 @@
 // ML Service API client for mood classification and recommendations
+import { z } from "zod";
+import { optionalEnv } from "../env";
 
-const ML_SERVICE_URL = import.meta.env.VITE_ML_SERVICE_URL || 'http://localhost:8000';
+const ML_SERVICE_URL = optionalEnv("VITE_ML_SERVICE_URL", "http://localhost:8000");
+const ML_API_TIMEOUT_MS = 12000;
 
 export interface AudioFeatures {
   danceability: number;
@@ -21,8 +24,8 @@ export interface MoodItem {
 
 export interface MoodClassifyResponse {
   moods: MoodItem[];
-  dominant_mood: string | null;
-  dominant_color: string | null;
+  dominant_mood?: string | null;
+  dominant_color?: string | null;
   track_count: number;
   tracks_analyzed?: number;
   insights: Record<string, string>;
@@ -53,26 +56,155 @@ export interface TasteSimilarityResponse {
   };
 }
 
+export interface MlServiceHealth {
+  status: string;
+  light_mode: boolean;
+  taste_model_loaded: boolean;
+  ml_taste_model_loaded: boolean;
+  mood_classifier_loaded: boolean;
+  ml_mood_model_loaded: boolean;
+  genre_mood_fallback: boolean;
+  tracks_loaded: number;
+  inference_mode: string;
+  ml_features_available: boolean;
+}
+
+const moodItemSchema = z.object({
+  mood: z.string(),
+  percentage: z.number(),
+  color: z.string(),
+});
+
+const moodClassifyResponseSchema = z.object({
+  moods: z.array(moodItemSchema),
+  dominant_mood: z.string().nullable(),
+  dominant_color: z.string().nullable(),
+  track_count: z.number(),
+  tracks_analyzed: z.number().optional(),
+  insights: z.record(z.string(), z.string()),
+  average_features: z.record(z.string(), z.number()).optional(),
+});
+
+const latentProfileSchema = z.object({
+  "Energy-Valence Factor": z.number(),
+  "Acoustic-Electronic Factor": z.number(),
+  "Dance-Chill Factor": z.number(),
+  "Vocal-Instrumental Factor": z.number(),
+  "Tempo-Rhythm Factor": z.number(),
+});
+
+const tasteSimilarityResponseSchema = z.object({
+  similarity: z.number(),
+  algorithm: z.string(),
+  user1_latent_profile: latentProfileSchema,
+  user2_latent_profile: latentProfileSchema,
+  model_info: z.object({
+    is_trained: z.boolean(),
+    algorithm: z.string(),
+    n_components: z.number(),
+    explained_variance: z.number(),
+    n_tracks_trained: z.number(),
+    features_used: z.array(z.string()),
+    embeddings_loaded: z.number(),
+  }),
+});
+
+const moodCategoriesSchema = z.object({
+  categories: z.array(z.string()),
+  colors: z.record(z.string(), z.string()),
+});
+
+const mlServiceHealthSchema = z.object({
+  status: z.string(),
+  light_mode: z.boolean(),
+  taste_model_loaded: z.boolean(),
+  ml_taste_model_loaded: z.boolean(),
+  mood_classifier_loaded: z.boolean(),
+  ml_mood_model_loaded: z.boolean(),
+  genre_mood_fallback: z.boolean(),
+  tracks_loaded: z.number(),
+  inference_mode: z.string(),
+  ml_features_available: z.boolean(),
+});
+
+const sampleProfilesSchema = z.object({
+  profiles: z.record(z.string(), z.object({
+    name: z.string(),
+    description: z.string(),
+    track_ids: z.array(z.string()),
+  })),
+});
+
+const enhancedTasteResponseSchema = z.object({
+  overall_similarity: z.number(),
+  audio_similarity: z.number().nullable(),
+  shared_tracks: z.array(z.string()),
+  shared_albums: z.array(z.string()),
+  shared_artists: z.array(z.string()),
+  breakdown: z.object({
+    base_similarity: z.number(),
+    track_bonus: z.number(),
+    album_bonus: z.number(),
+    artist_bonus: z.number(),
+    audio_score: z.number(),
+  }),
+});
+
+async function fetchMlJson<T>(
+  path: string,
+  options: RequestInit,
+  schema: z.ZodSchema<T>,
+  fallbackErrorMessage: string
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ML_API_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${ML_SERVICE_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || fallbackErrorMessage);
+    }
+
+    const json = await response.json();
+    const parsed = schema.safeParse(json);
+    if (!parsed.success) {
+      throw new Error(`Invalid ML response format for ${path}`);
+    }
+
+    return parsed.data;
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw new Error("ML service request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /**
  * Classify playlist mood from audio features
  */
 export async function classifyPlaylistMood(
   tracks: AudioFeatures[]
 ): Promise<MoodClassifyResponse> {
-  const response = await fetch(`${ML_SERVICE_URL}/predict/mood`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchMlJson(
+    '/predict/mood',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tracks }),
     },
-    body: JSON.stringify({ tracks }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to classify mood');
-  }
-
-  return response.json();
+    moodClassifyResponseSchema,
+    'Failed to classify mood'
+  );
 }
 
 /**
@@ -81,20 +213,18 @@ export async function classifyPlaylistMood(
 export async function classifyMoodByTrackIds(
   trackIds: string[]
 ): Promise<MoodClassifyResponse> {
-  const response = await fetch(`${ML_SERVICE_URL}/predict/mood/by-ids`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchMlJson(
+    '/predict/mood/by-ids',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ track_ids: trackIds }),
     },
-    body: JSON.stringify({ track_ids: trackIds }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to classify mood');
-  }
-
-  return response.json();
+    moodClassifyResponseSchema,
+    'Failed to classify mood'
+  );
 }
 
 /**
@@ -104,23 +234,21 @@ export async function getTasteSimilarity(
   user1Tracks: string[],
   user2Tracks: string[]
 ): Promise<TasteSimilarityResponse> {
-  const response = await fetch(`${ML_SERVICE_URL}/predict/ml_taste_similarity`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchMlJson(
+    '/predict/ml_taste_similarity',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user1_tracks: user1Tracks,
+        user2_tracks: user2Tracks,
+      }),
     },
-    body: JSON.stringify({
-      user1_tracks: user1Tracks,
-      user2_tracks: user2Tracks,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to compute similarity');
-  }
-
-  return response.json();
+    tasteSimilarityResponseSchema,
+    'Failed to compute similarity'
+  );
 }
 
 /**
@@ -130,27 +258,24 @@ export async function getMoodCategories(): Promise<{
   categories: string[];
   colors: Record<string, string>;
 }> {
-  const response = await fetch(`${ML_SERVICE_URL}/moods/categories`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch mood categories');
-  }
-  return response.json();
+  return fetchMlJson(
+    '/moods/categories',
+    { method: 'GET' },
+    moodCategoriesSchema,
+    'Failed to fetch mood categories'
+  );
 }
 
 /**
  * Health check for ML service
  */
-export async function checkMlServiceHealth(): Promise<{
-  status: string;
-  taste_model_loaded: boolean;
-  mood_classifier_loaded: boolean;
-  tracks_loaded: number;
-}> {
-  const response = await fetch(`${ML_SERVICE_URL}/health`);
-  if (!response.ok) {
-    throw new Error('ML service is not available');
-  }
-  return response.json();
+export async function checkMlServiceHealth(): Promise<MlServiceHealth> {
+  return fetchMlJson(
+    '/health',
+    { method: 'GET' },
+    mlServiceHealthSchema,
+    'ML service is not available'
+  );
 }
 
 /**
@@ -168,11 +293,12 @@ export interface SampleProfile {
 export async function getSampleProfiles(): Promise<{
   profiles: Record<string, SampleProfile>;
 }> {
-  const response = await fetch(`${ML_SERVICE_URL}/demo/sample-profiles`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch sample profiles');
-  }
-  return response.json();
+  return fetchMlJson(
+    '/demo/sample-profiles',
+    { method: 'GET' },
+    sampleProfilesSchema,
+    'Failed to fetch sample profiles'
+  );
 }
 
 /**
@@ -180,7 +306,7 @@ export async function getSampleProfiles(): Promise<{
  */
 export interface EnhancedTasteResponse {
   overall_similarity: number;
-  audio_similarity: number | null;
+  audio_similarity?: number | null;
   shared_tracks: string[];
   shared_albums: string[];
   shared_artists: string[];
@@ -201,83 +327,24 @@ export async function getEnhancedTasteSimilarity(
   user1: { trackIds: string[]; albumIds: string[]; artists: string[] },
   user2: { trackIds: string[]; albumIds: string[]; artists: string[] }
 ): Promise<EnhancedTasteResponse> {
-  const response = await fetch(`${ML_SERVICE_URL}/predict/enhanced_taste`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchMlJson(
+    '/predict/enhanced_taste',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user1_track_ids: user1.trackIds,
+        user2_track_ids: user2.trackIds,
+        user1_album_ids: user1.albumIds,
+        user2_album_ids: user2.albumIds,
+        user1_artists: user1.artists,
+        user2_artists: user2.artists,
+      }),
     },
-    body: JSON.stringify({
-      user1_track_ids: user1.trackIds,
-      user2_track_ids: user2.trackIds,
-      user1_album_ids: user1.albumIds,
-      user2_album_ids: user2.albumIds,
-      user1_artists: user1.artists,
-      user2_artists: user2.artists,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to compute enhanced similarity');
-  }
-
-  return response.json();
+    enhancedTasteResponseSchema,
+    'Failed to compute enhanced similarity'
+  );
 }
 
-/**
- * Classify mood from genres (when Spotify audio features are unavailable)
- */
-export interface GenreMoodResponse {
-  dominant_mood: string;
-  confidence: number;
-  mood_distribution: Record<string, number>;
-  warning?: string;
-}
-
-export async function classifyMoodByGenres(genres: string[]): Promise<GenreMoodResponse> {
-  const response = await fetch(`${ML_SERVICE_URL}/predict/mood/by-genres`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ genres }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to classify mood by genres');
-  }
-
-  return response.json();
-}
-
-/**
- * Response type for artist genres lookup
- */
-export interface ArtistGenreResponse {
-  genres: string[];
-  artist_matches: Record<string, string[]>;
-  artists_found: number;
-  artists_not_found: string[];
-}
-
-/**
- * Look up genres for given artist names using ML service database
- * This is a workaround for Spotify API dev mode not returning genres
- */
-export async function lookupArtistGenres(artists: string[]): Promise<ArtistGenreResponse> {
-  const response = await fetch(`${ML_SERVICE_URL}/lookup/artist-genres`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ artists }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to look up artist genres');
-  }
-
-  return response.json();
-}

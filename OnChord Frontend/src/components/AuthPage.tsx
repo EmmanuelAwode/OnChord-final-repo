@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { toast } from "sonner";
+import { captureException } from "../lib/monitoring";
 
 interface AuthPageProps {
   onAuthed: (data: { username: string; email: string }) => void;
@@ -23,7 +24,6 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
     setErrorMsg(null);
-    console.log("handleGoogleLogin called");
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -36,7 +36,6 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
           },
         },
       });
-      console.log("Google OAuth response — url:", data?.url, "error:", error);
       if (error) throw error;
 
       if (data?.url) {
@@ -45,7 +44,7 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
         throw new Error("No redirect URL returned from Supabase");
       }
     } catch (error: any) {
-      console.error("Google login error:", error);
+      captureException(error, "google-oauth-login");
       const msg = error?.message || "Failed to connect with Google";
       setErrorMsg(msg);
       toast.error(msg);
@@ -56,7 +55,9 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
   const handleSpotifyLogin = async () => {
     setSpotifyLoading(true);
     setErrorMsg(null);
-    console.log("handleSpotifyLogin called");
+    // Ensure social login callbacks are never mistaken for the Spotify API connect flow.
+    sessionStorage.removeItem("spotify_pkce_code_verifier");
+    sessionStorage.removeItem("spotify_pkce_flow");
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "spotify",
@@ -70,7 +71,6 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
           },
         },
       });
-      console.log("OAuth response — url:", data?.url, "error:", error);
       if (error) throw error;
 
       if (data?.url) {
@@ -79,7 +79,7 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
         throw new Error("No redirect URL returned from Supabase");
       }
     } catch (error: any) {
-      console.error("Spotify login error:", error);
+      captureException(error, "spotify-oauth-login");
       const msg = error?.message || "Failed to connect with Spotify";
       setErrorMsg(msg);
       toast.error(msg);
@@ -98,9 +98,6 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
           email: formData.email.trim(),
           password: formData.password,
         });
-
-        console.log("SIGN IN data:", data);
-        console.log("SIGN IN error:", error);
 
         if (error) throw error;
 
@@ -125,10 +122,6 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
         },
       });
 
-
-      console.log("SIGN UP data:", data);
-      console.log("SIGN UP error:", error);
-
       if (error) throw error;
 
       // IMPORTANT: If email confirmations are ON, session will be null here.
@@ -149,7 +142,7 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
       toast.success("Account created!");
       onAuthed({ username, email: u?.email ?? formData.email });
     } catch (error: any) {
-      console.log("AUTH ERROR:", error);
+      captureException(error, "auth-form-submit");
 
       if (error?.status === 429) {
         const msg = "Too many signup emails sent. Wait a bit and try again.";
@@ -253,7 +246,6 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
                     const { error } = await supabase.auth.resetPasswordForEmail(email, {
                                       redirectTo: `${window.location.origin}/reset-password`,
                                     });
-                    console.log("RESET PASSWORD error:", error);
 
                     if (error) {
                       setErrorMsg(error.message);

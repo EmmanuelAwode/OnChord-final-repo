@@ -13,7 +13,7 @@ import { supabase } from "../lib/supabaseClient";
 import { getFollowing } from "../lib/api/follows";
 import { type Profile } from "../lib/api/profiles";
 import { getUserMusicData, type UserMusicData } from "../lib/api/tasteMatching";
-import { classifyMoodByTrackIds } from "../lib/api/mlService";
+import { checkMlServiceHealth, classifyMoodByTrackIds } from "../lib/api/mlService";
 
 // Default neutral personality values
 const DEFAULT_PERSONALITY = {
@@ -59,6 +59,7 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
   const [myMusicData, setMyMusicData] = useState<UserMusicData | null>(null);
   const [myMLPersonality, setMyMLPersonality] = useState<PersonalityProfile | null>(null);
   const [loadingMyData, setLoadingMyData] = useState(false);
+  const [mlMoodAvailable, setMlMoodAvailable] = useState(true);
 
   // Spotify data
   const { connected: spotifyConnected, loading: spotifyLoading } = useSpotifyConnection();
@@ -67,6 +68,13 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
   const [audioFeatures, setAudioFeatures] = useState<AudioFeatures | null>(null);
   const [featuresLoading, setFeaturesLoading] = useState(false);
   const [audioFeaturesAvailable, setAudioFeaturesAvailable] = useState(true);
+  const [spotifyMlFallbackPersonality, setSpotifyMlFallbackPersonality] = useState<PersonalityProfile | null>(null);
+
+  useEffect(() => {
+    checkMlServiceHealth()
+      .then((health) => setMlMoodAvailable(health.mood_classifier_loaded))
+      .catch(() => setMlMoodAvailable(false));
+  }, []);
 
   // Helper to compute personality type from features
   const computePersonalityType = (p: PersonalityProfile) => {
@@ -103,7 +111,7 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
             ? musicData.trackIds 
             : musicData.albumIds;
             
-          if (idsToCheck.length > 0) {
+          if (mlMoodAvailable && idsToCheck.length > 0) {
             const moodResult = await classifyMoodByTrackIds(idsToCheck);
             if (moodResult.average_features) {
               const f = moodResult.average_features;
@@ -173,7 +181,7 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
                 ? musicData.trackIds 
                 : musicData.albumIds;
                 
-              if (idsToCheck.length > 0) {
+              if (mlMoodAvailable && idsToCheck.length > 0) {
                 const moodResult = await classifyMoodByTrackIds(idsToCheck);
                 if (moodResult.average_features) {
                   const f = moodResult.average_features;
@@ -207,31 +215,70 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
       }
     }
     loadRealFriends();
-  }, [currentUserId]);
+  }, [currentUserId, mlMoodAvailable]);
 
   // Fetch audio features when top tracks are loaded
   useEffect(() => {
     if (!spotifyConnected || topTracks.length === 0) return;
 
     let cancelled = false;
-    setFeaturesLoading(true);
 
-    computeAverageAudioFeatures(topTracks.map((t) => t.id))
-      .then((features) => {
-        if (!cancelled) {
-          setAudioFeatures(features);
-          if (!features) setAudioFeaturesAvailable(false);
+    const loadFeatures = async () => {
+      setFeaturesLoading(true);
+      setAudioFeaturesAvailable(true);
+
+      try {
+        const trackIds = topTracks.map((t) => t.id);
+        const features = await computeAverageAudioFeatures(trackIds);
+
+        if (cancelled) return;
+
+        setAudioFeatures(features);
+
+        if (features) {
+          setSpotifyMlFallbackPersonality(null);
+          return;
         }
-      })
-      .catch(() => {
-        if (!cancelled) setAudioFeaturesAvailable(false);
-      })
-      .finally(() => {
+
+        // Spotify audio-features endpoint may be restricted; fall back to ML by current top tracks.
+        setAudioFeaturesAvailable(false);
+
+        if (!mlMoodAvailable) return;
+
+        try {
+          const moodResult = await classifyMoodByTrackIds(trackIds);
+          if (cancelled) return;
+
+          if (moodResult.average_features) {
+            const f = moodResult.average_features;
+            setSpotifyMlFallbackPersonality({
+              energy: Math.round((f.energy || 0.5) * 100),
+              danceability: Math.round((f.danceability || 0.5) * 100),
+              valence: Math.round((f.valence || 0.5) * 100),
+              acousticness: Math.round((f.acousticness || 0.5) * 100),
+              instrumentalness: Math.round((f.instrumentalness || 0) * 100),
+            });
+          } else {
+            setSpotifyMlFallbackPersonality(null);
+          }
+        } catch {
+          if (!cancelled) {
+            setSpotifyMlFallbackPersonality(null);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setAudioFeaturesAvailable(false);
+        }
+      } finally {
         if (!cancelled) setFeaturesLoading(false);
-      });
+      }
+    };
+
+    loadFeatures();
 
     return () => { cancelled = true; };
-  }, [spotifyConnected, topTracks]);
+  }, [spotifyConnected, topTracks, mlMoodAvailable]);
 
   // Build personality data from Spotify audio features, ML data, or fallback
   const personalityData = useMemo(() => {
@@ -252,6 +299,8 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
         acousticness: Math.round(audioFeatures.acousticness * 100),
         instrumentalness: Math.round(audioFeatures.instrumentalness * 100),
       };
+    } else if (spotifyMlFallbackPersonality) {
+      myPersonality = spotifyMlFallbackPersonality;
     } else if (myMLPersonality) {
       myPersonality = myMLPersonality;
     }
@@ -276,7 +325,7 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
       { attribute: "Acousticness", you: myPersonality.acousticness, friend: friendPersonality.acousticness },
       { attribute: "Instrumental", you: myPersonality.instrumentalness, friend: friendPersonality.instrumentalness },
     ];
-  }, [audioFeatures, myMLPersonality, selectedFriend]);
+  }, [audioFeatures, spotifyMlFallbackPersonality, myMLPersonality, selectedFriend]);
 
   // Genre breakdown from top artists
   const genres = useMemo(() => {
@@ -294,6 +343,11 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
       danceability = audioFeatures.danceability * 100;
       valence = audioFeatures.valence * 100;
       acousticness = audioFeatures.acousticness * 100;
+    } else if (spotifyMlFallbackPersonality) {
+      energy = spotifyMlFallbackPersonality.energy;
+      danceability = spotifyMlFallbackPersonality.danceability;
+      valence = spotifyMlFallbackPersonality.valence;
+      acousticness = spotifyMlFallbackPersonality.acousticness;
     } else if (myMLPersonality) {
       energy = myMLPersonality.energy;
       danceability = myMLPersonality.danceability;
@@ -329,7 +383,7 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
     else if (myMusicData && myMusicData.artistNames.length > 0) badges.push(myMusicData.artistNames[0]);
 
     return { title, badges: badges.slice(0, 3), loading: false };
-  }, [audioFeatures, myMLPersonality, genres, loadingMyData, featuresLoading, myMusicData]);
+  }, [audioFeatures, spotifyMlFallbackPersonality, myMLPersonality, genres, loadingMyData, featuresLoading, myMusicData]);
 
   const singlePersonalityData = personalityData.map((item) => ({
     attribute: item.attribute,
@@ -362,6 +416,11 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
         <p className="text-muted-foreground max-w-2xl mx-auto">
           Advanced ML analysis of your listening patterns reveals your unique musical DNA
         </p>
+        {!mlMoodAvailable && (
+          <p className="text-sm text-amber-500 max-w-2xl mx-auto">
+            Advanced personality inference is limited right now. Spotify listening analysis is still available.
+          </p>
+        )}
       </div>
 
       {/* Spotify Connection Prompt */}
@@ -454,6 +513,8 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
           <p className="text-muted-foreground">
             {spotifyConnected && audioFeatures
               ? "Based on your Spotify listening data"
+              : spotifyConnected && spotifyMlFallbackPersonality
+                ? "Based on ML analysis of your Spotify top tracks"
               : myMLPersonality 
                 ? "Based on your reviews and favorites"
                 : "Your personality type based on listening habits"}

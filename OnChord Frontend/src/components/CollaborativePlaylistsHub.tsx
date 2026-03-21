@@ -10,6 +10,8 @@ import { toast } from "sonner@2.0.3";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
 import { getFollowing } from "../lib/api/follows";
+import { getProfiles } from "../lib/api/profiles";
+import { supabase } from "../lib/supabaseClient";
 
 interface CollaborativePlaylistsHubProps {
   onNavigate?: (page: string) => void;
@@ -27,20 +29,131 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
   const [playlistDescription, setPlaylistDescription] = useState("");
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [friends, setFriends] = useState<Array<{ id: string; name: string; avatar: string }>>([]);
+  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+  const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
 
   // Fetch friends (following list)
   useEffect(() => {
-    if (!profile?.id) return;
-    getFollowing(profile.id).then((following) => {
-      setFriends(
-        following.map((f: any) => ({
-          id: f.id,
-          name: f.display_name || f.username || "Music Lover",
-          avatar: f.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${f.id}`,
-        }))
-      );
-    }).catch(() => setFriends([]));
+    if (!profile?.id) {
+      setFriends([]);
+      return;
+    }
+
+    let active = true;
+
+    async function loadFollowingProfiles() {
+      setIsLoadingFriends(true);
+      try {
+        const followingIds = await getFollowing();
+
+        if (!active) return;
+
+        if (followingIds.length === 0) {
+          setFriends([]);
+          return;
+        }
+
+        const followingProfiles = await getProfiles(followingIds);
+
+        if (!active) return;
+
+        setFriends(
+          followingProfiles.map((f) => ({
+            id: f.id,
+            name: f.display_name || f.username || "Music Lover",
+            avatar: f.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${f.id}`,
+          }))
+        );
+      } catch (error) {
+        console.error("Failed to load following profiles:", error);
+        if (active) setFriends([]);
+      } finally {
+        if (active) setIsLoadingFriends(false);
+      }
+    }
+
+    loadFollowingProfiles();
+
+    return () => {
+      active = false;
+    };
   }, [profile?.id]);
+
+  // Listen for invite responses and keep collaborator/pending counts in sync.
+  useEffect(() => {
+    if (!profile?.id) return;
+
+    const channel = supabase
+      .channel(`collab_invite_responses_${profile.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${profile.id}`,
+        },
+        (payload) => {
+          const n = payload.new as any;
+          const title = (n.title || "") as string;
+
+          const isInviteResponse =
+            n.type === "mention" &&
+            (title === "Invite accepted" || title === "Invite declined") &&
+            !!n.playlist_id;
+
+          if (!isInviteResponse) return;
+
+          const updated = playlists.map((playlist) => {
+            if (playlist.id !== n.playlist_id) return playlist;
+
+            const nextPending = Math.max((playlist.pendingInviteCount || 0) - 1, 0);
+            const base = {
+              ...playlist,
+              pendingInviteCount: nextPending,
+              lastUpdated: "Just now",
+            };
+
+            if (title !== "Invite accepted") {
+              return base;
+            }
+
+            if (!n.action_user_id) {
+              return base;
+            }
+
+            const alreadyContributor = (playlist.contributors || []).some(
+              (c: any) => c.id === n.action_user_id
+            );
+
+            if (alreadyContributor) {
+              return base;
+            }
+
+            return {
+              ...base,
+              contributors: [
+                ...(playlist.contributors || []),
+                {
+                  id: n.action_user_id,
+                  name: n.action_user_name || "Collaborator",
+                  avatar:
+                    n.action_user_avatar ||
+                    `https://api.dicebear.com/7.x/avataaars/svg?seed=${n.action_user_id}`,
+                },
+              ],
+            };
+          });
+
+          setPlaylists(updated);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.id, playlists, setPlaylists]);
 
   const toggleFriendSelection = (friendId: string) => {
     setSelectedFriends(prev =>
@@ -50,7 +163,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
     );
   };
 
-  const handleCreatePlaylist = () => {
+  const handleCreatePlaylist = async () => {
     if (!playlistTitle.trim()) {
       toast.error("Please enter a playlist title");
       return;
@@ -60,27 +173,93 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       return;
     }
 
+    const selectedCollaborators = selectedFriends
+      .map((friendId) => friends.find((f) => f.id === friendId))
+      .filter((f): f is { id: string; name: string; avatar: string } => !!f);
+
+    if (selectedCollaborators.length === 0) {
+      toast.error("Could not resolve selected collaborators. Please try again.");
+      return;
+    }
+
+    setIsCreatingPlaylist(true);
+
+    let playlistDbId: string | null = null;
+
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const currentUserId = session.session?.user?.id;
+
+      if (!currentUserId) {
+        toast.error("Please sign in to create a collaborative playlist");
+        return;
+      }
+
+      // Create playlist in DB so invite accept/decline can be processed by recipients.
+      const { data: createdPlaylist, error: playlistError } = await supabase
+        .from("collaborative_playlists")
+        .insert({
+          title: playlistTitle,
+          description: playlistDescription || "A new collaborative playlist",
+          cover_url: `https://api.dicebear.com/7.x/shapes/svg?seed=${Date.now()}`,
+          created_by: currentUserId,
+        })
+        .select("id")
+        .single();
+
+      if (playlistError) throw playlistError;
+      playlistDbId = createdPlaylist.id;
+
+      // Add creator as an initial contributor.
+      await supabase.from("playlist_collaborators").upsert(
+        {
+          playlist_id: playlistDbId,
+          user_id: currentUserId,
+          role: 'owner',
+        },
+        { onConflict: "playlist_id,user_id" }
+      );
+
+      // Send invite notifications to selected collaborators.
+      const inviterName = profile?.display_name || profile?.username || "A user";
+      const inviterAvatar = profile?.avatar_url || null;
+
+      const inviteRows = selectedCollaborators.map((collab) => ({
+        user_id: collab.id,
+        type: "playlist_invite",
+        title: "Playlist collaboration invite",
+        message: `${inviterName} invited you to collaborate on \"${playlistTitle}\".`,
+        action_user_id: currentUserId,
+        action_user_name: inviterName,
+        action_user_avatar: inviterAvatar,
+        playlist_id: playlistDbId,
+        is_read: false,
+      }));
+
+      const { error: inviteError } = await supabase.from("notifications").insert(inviteRows);
+      if (inviteError) throw inviteError;
+    } catch (error) {
+      console.error("Failed to create collaborative playlist invites:", error);
+      toast.error("Failed to create playlist invites. Please try again.");
+      return;
+    } finally {
+      setIsCreatingPlaylist(false);
+    }
+
     // Create new playlist object
     const newPlaylist = {
-      id: `collab-${Date.now()}`,
+      id: playlistDbId || `collab-${Date.now()}`,
       title: playlistTitle,
       description: playlistDescription || "A new collaborative playlist",
       cover: `https://api.dicebear.com/7.x/shapes/svg?seed=${Date.now()}`,
       trackCount: 0,
+      pendingInviteCount: selectedCollaborators.length,
       contributors: [
         {
           id: profile?.id || "current-user",
           name: profile?.display_name || profile?.username || "You",
           avatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=user`,
         },
-        ...selectedFriends.map(friendId => {
-          const friend = friends.find(f => f.id === friendId);
-          return {
-            id: friend!.id,
-            name: friend!.name,
-            avatar: friend!.avatar,
-          };
-        }),
       ],
       lastUpdated: "Just now",
       moods: ["New", "Fresh", "Collaborative"],
@@ -89,7 +268,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
     // Add to the beginning of the playlists array
     setPlaylists([newPlaylist, ...playlists]);
 
-    toast.success(`Created "${playlistTitle}" with ${selectedFriends.length} collaborator${selectedFriends.length > 1 ? 's' : ''}!`);
+    toast.success(`Invites sent to ${selectedFriends.length} collaborator${selectedFriends.length > 1 ? 's' : ''}!`);
     setShowCreateModal(false);
     setPlaylistTitle("");
     setPlaylistDescription("");
@@ -227,6 +406,11 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
                     <span className="text-xs text-muted-foreground">
                       {playlist.contributors.length} collaborators
                     </span>
+                    {(playlist.pendingInviteCount || 0) > 0 && (
+                      <Badge className="bg-amber-500/20 text-amber-400 border-0 text-[10px] ml-1">
+                        {playlist.pendingInviteCount} pending
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex -space-x-2">
                     {playlist.contributors.slice(0, 5).map((contributor) => (
@@ -306,7 +490,17 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
                 </label>
               </div>
               <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
-                {friends.map((friend) => (
+                {isLoadingFriends && (
+                  <div className="p-4 text-center text-sm text-muted-foreground">Loading followed users...</div>
+                )}
+
+                {!isLoadingFriends && friends.length === 0 && (
+                  <div className="p-4 text-center text-sm text-muted-foreground border border-border rounded-lg bg-background">
+                    You are not following anyone yet. Follow users first to invite collaborators.
+                  </div>
+                )}
+
+                {!isLoadingFriends && friends.map((friend) => (
                   <div
                     key={friend.id}
                     onClick={() => toggleFriendSelection(friend.id)}
@@ -364,9 +558,10 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             </Button>
             <Button
               onClick={handleCreatePlaylist}
+              disabled={isCreatingPlaylist || isLoadingFriends}
               className="flex-1 bg-gradient-to-r from-primary to-accent"
             >
-              Create Playlist
+              {isCreatingPlaylist ? "Sending Invites..." : "Create Playlist"}
             </Button>
           </div>
         </DialogContent>

@@ -318,7 +318,20 @@ export function CommunityFeedPage({ onOpenAlbum }: CommunityFeedPageProps = {}) 
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const text = `${review.albumTitle} by ${review.albumArtist} — reviewed on OnChord`;
+                        const url = window.location.href;
+                        if (navigator.share) {
+                          try { await navigator.share({ title: text, url }); return; } catch {}
+                        }
+                        try {
+                          await navigator.clipboard.writeText(`${text} | ${url}`);
+                          toast.success("Copied to clipboard!");
+                        } catch {
+                          toast.error("Could not copy link");
+                        }
+                      }}
                       className="flex items-center gap-2 h-9 px-3 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all ml-auto"
                     >
                       <Share2 className="w-4 h-4" />

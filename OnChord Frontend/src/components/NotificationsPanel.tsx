@@ -10,6 +10,8 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
+import { supabase } from '../lib/supabaseClient';
+import { toast } from 'sonner';
 
 export default function NotificationsPanel() {
   const {
@@ -24,6 +26,86 @@ export default function NotificationsPanel() {
 
   const [isOpen, setIsOpen] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+
+  const respondToPlaylistInvite = async (
+    notification: any,
+    decision: 'accept' | 'decline',
+    e: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    e.stopPropagation();
+
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const currentUserId = session.session?.user?.id;
+      if (!currentUserId) {
+        toast.error('Please sign in to respond to invites');
+        return;
+      }
+
+      let playlistTitle = 'this playlist';
+      if (notification.playlistId) {
+        const { data: playlistRow } = await supabase
+          .from('collaborative_playlists')
+          .select('title')
+          .eq('id', notification.playlistId)
+          .maybeSingle();
+        playlistTitle = playlistRow?.title || playlistTitle;
+      }
+
+      if (decision === 'accept') {
+        if (!notification.playlistId) {
+          toast.error('Invalid invite: missing playlist ID');
+          return;
+        }
+
+        const { error: contributorError } = await supabase
+          .from('playlist_collaborators')
+          .upsert(
+            {
+              playlist_id: notification.playlistId,
+              user_id: currentUserId,
+              role: 'contributor',
+            },
+            { onConflict: 'playlist_id,user_id' }
+          );
+
+        if (contributorError) throw contributorError;
+      }
+
+      await markAsRead(notification.id);
+
+      if (notification.actionUserId) {
+        const { data: myProfile } = await supabase
+          .from('profiles')
+          .select('display_name, username, avatar_url')
+          .eq('id', currentUserId)
+          .maybeSingle();
+
+        const responderName = myProfile?.display_name || myProfile?.username || 'A collaborator';
+        const responderAvatar = myProfile?.avatar_url || null;
+
+        await supabase.from('notifications').insert({
+          user_id: notification.actionUserId,
+          type: 'mention',
+          title: decision === 'accept' ? 'Invite accepted' : 'Invite declined',
+          message:
+            decision === 'accept'
+              ? `${responderName} accepted your invite to \"${playlistTitle}\".`
+              : `${responderName} declined your invite to \"${playlistTitle}\".`,
+          action_user_id: currentUserId,
+          action_user_name: responderName,
+          action_user_avatar: responderAvatar,
+          playlist_id: notification.playlistId || null,
+          is_read: false,
+        });
+      }
+
+      toast.success(decision === 'accept' ? 'Joined playlist' : 'Invite declined');
+    } catch (error) {
+      console.error('Failed to respond to playlist invite:', error);
+      toast.error('Could not process invite response');
+    }
+  };
 
   const filteredNotifications = showUnreadOnly
     ? notifications.filter((n) => !n.isRead)
@@ -207,6 +289,31 @@ export default function NotificationsPanel() {
                       <p className="text-xs text-muted-foreground mb-2">
                         {notification.message}
                       </p>
+
+                      {notification.type === 'playlist_invite' && !notification.isRead && (
+                        <div className="flex items-center gap-2 mb-2">
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
+                              respondToPlaylistInvite(notification, 'accept', e)
+                            }
+                          >
+                            Accept
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
+                              respondToPlaylistInvite(notification, 'decline', e)
+                            }
+                          >
+                            Decline
+                          </Button>
+                        </div>
+                      )}
+
                       <p className="text-xs text-muted-foreground">
                         {notification.timestamp}
                       </p>

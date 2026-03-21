@@ -11,7 +11,7 @@ Complete backend infrastructure for OnChord's social features:
 - **music_lists** - User's custom playlists/collections
 - **list_items** - Items in lists
 - **collaborative_playlists** - Multi-user playlists
-- **playlist_contributors** - Who can edit playlists
+- **playlist_collaborators** - Who can edit playlists
 - **playlist_tracks** - Tracks in collaborative playlists
 - **playlist_messages** - Chat within playlists
 - **notifications** - In-app notifications
@@ -55,7 +55,7 @@ In Supabase Dashboard → **Table Editor**, you should see:
 - music_lists
 - list_items
 - collaborative_playlists
-- playlist_contributors
+- playlist_collaborators
 - playlist_tracks
 - playlist_messages
 - notifications

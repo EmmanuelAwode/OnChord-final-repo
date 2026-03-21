@@ -5,29 +5,7 @@ import { Badge } from "./ui/badge";
 import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
 import { Heart, Send, Star, MessageCircle } from "lucide-react";
-import { reviewComments } from "../lib/useReviewComments";
-
-interface Reply {
-  id: string;
-  userId: string;
-  userName: string;
-  userAvatar: string;
-  content: string;
-  timestamp: string;
-  likes: number;
-}
-
-interface Comment {
-  id: string;
-  reviewId: string;
-  userId: string;
-  userName: string;
-  userAvatar: string;
-  content: string;
-  timestamp: string;
-  likes: number;
-  replies?: Reply[];
-}
+import { useReviewComments } from "../lib/useReviewComments";
 
 interface CommentsModalProps {
   isOpen: boolean;
@@ -52,9 +30,8 @@ export function CommentsModal({ isOpen, onClose, review }: CommentsModalProps) {
   const [likedComments, setLikedComments] = useState<string[]>([]);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
-  const [localComments, setLocalComments] = useState<Comment[]>(() => 
-    reviewComments[review.id] || []
-  );
+
+  const { comments, addComment, isLoading } = useReviewComments(review.id);
 
   const handleLikeComment = (commentId: string) => {
     setLikedComments(prev => 
@@ -64,48 +41,15 @@ export function CommentsModal({ isOpen, onClose, review }: CommentsModalProps) {
     );
   };
 
-  const handleAddComment = () => {
+  const handleAddComment = async () => {
     if (!newComment.trim()) return;
-
-    const comment: Comment = {
-      id: `rc-new-${Date.now()}`,
-      reviewId: review.id,
-      userId: "user-1",
-      userName: "Marcus Williams",
-      userAvatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=400",
-      content: newComment,
-      timestamp: "Just now",
-      likes: 0,
-      replies: [],
-    };
-
-    setLocalComments([comment, ...localComments]);
+    await addComment(newComment);
     setNewComment("");
   };
 
-  const handleAddReply = (commentId: string) => {
+  const handleAddReply = async (commentId: string) => {
     if (!replyText.trim()) return;
-
-    const reply: Reply = {
-      id: `reply-${Date.now()}`,
-      userId: "user-1",
-      userName: "Marcus Williams",
-      userAvatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=400",
-      content: replyText,
-      timestamp: "Just now",
-      likes: 0,
-    };
-
-    setLocalComments(prev => prev.map(comment => {
-      if (comment.id === commentId) {
-        return {
-          ...comment,
-          replies: [...(comment.replies || []), reply],
-        };
-      }
-      return comment;
-    }));
-
+    await addComment(replyText, commentId);
     setReplyText("");
     setReplyingTo(null);
   };
@@ -122,7 +66,7 @@ export function CommentsModal({ isOpen, onClose, review }: CommentsModalProps) {
     }
   };
 
-  const totalComments = localComments.reduce((total, comment) => {
+  const totalComments = comments.reduce((total, comment) => {
     return total + 1 + (comment.replies?.length || 0);
   }, 0);
 
@@ -192,20 +136,28 @@ export function CommentsModal({ isOpen, onClose, review }: CommentsModalProps) {
               {totalComments} {totalComments === 1 ? 'Comment' : 'Comments'}
             </h4>
             
-            {localComments.length === 0 ? (
+            {isLoading ? (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground text-sm">Loading comments...</p>
+              </div>
+            ) : comments.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-2">No comments yet</p>
                 <p className="text-sm text-muted-foreground">Be the first to share your thoughts!</p>
               </div>
             ) : (
-              localComments.map((comment) => (
+              comments.map((comment) => (
                 <div key={comment.id} className="space-y-3">
                   {/* Main Comment */}
-                  <div className="flex gap-3 p-4 rounded-lg bg-muted/20 hover:bg-muted/30 transition animate-fade-in">
-                    <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm text-primary">
-                        {comment.userName.charAt(0).toUpperCase()}
-                      </span>
+                  <div className="flex gap-3 p-4 rounded-lg bg-muted/20 hover:bg-muted/30 transition">
+                    <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {comment.userAvatar ? (
+                        <img src={comment.userAvatar} alt={comment.userName} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-sm text-primary">
+                          {comment.userName.charAt(0).toUpperCase()}
+                        </span>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
@@ -252,10 +204,14 @@ export function CommentsModal({ isOpen, onClose, review }: CommentsModalProps) {
                           key={reply.id}
                           className="flex gap-3 p-3 rounded-lg bg-muted/10 hover:bg-muted/20 transition"
                         >
-                          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs text-primary">
-                              {reply.userName.charAt(0).toUpperCase()}
-                            </span>
+                          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            {reply.userAvatar ? (
+                              <img src={reply.userAvatar} alt={reply.userName} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-xs text-primary">
+                                {reply.userName.charAt(0).toUpperCase()}
+                              </span>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">

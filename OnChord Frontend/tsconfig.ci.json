@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/lib/env.ts",
+    "src/lib/monitoring.ts",
+    "src/lib/supabaseClient.ts",
+    "src/lib/api/mlService.ts",
+    "src/lib/__tests__/env.test.ts",
+    "src/vite-env.d.ts"
+  ]
+}

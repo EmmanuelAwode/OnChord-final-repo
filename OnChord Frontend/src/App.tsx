@@ -39,7 +39,7 @@ import { UserProfilePage } from "./components/UserProfilePage";
 import { useReviews } from "./lib/useUserInteractions";
 import { useNavigationHistory } from "./lib/useNavigationHistory";
 import { supabase } from "./lib/supabaseClient";
-import { getAlbum } from "./lib/api/spotify";
+import { getAlbum, isSpotifyAutolinkDisabled } from "./lib/api/spotify";
 import { Toaster } from "./components/ui/sonner";
 
 export default function App() {
@@ -64,6 +64,8 @@ export default function App() {
 
   const [session, setSession] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [authInitError, setAuthInitError] = useState<string | null>(null);
+  const [authWatchdogTriggered, setAuthWatchdogTriggered] = useState(false);
   
   const [insightsTab, setInsightsTab] = useState<string>("dashboard");
 
@@ -85,17 +87,82 @@ export default function App() {
     cover: "",
   });
 
+  const withTimeout = async <T,>(
+    promise: PromiseLike<T>,
+    timeoutMs: number,
+    timeoutMessage: string
+  ): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
+  const AUTH_INIT_TIMEOUT_MS = 20000;
+  const PROFILE_INIT_TIMEOUT_MS = 15000;
+
+  const isTimeoutError = (error: unknown) =>
+    error instanceof Error && error.message.toLowerCase().includes("timed out");
+
+  const getSessionWithRetry = async () => {
+    try {
+      return await withTimeout(
+        supabase.auth.getSession(),
+        AUTH_INIT_TIMEOUT_MS,
+        "Auth session lookup timed out"
+      );
+    } catch (error) {
+      if (!isTimeoutError(error)) throw error;
+
+      // Retry once to avoid transient network stalls causing a hard failure.
+      return await withTimeout(
+        supabase.auth.getSession(),
+        AUTH_INIT_TIMEOUT_MS,
+        "Auth session lookup timed out"
+      );
+    }
+  };
+
   const syncProfileAndRoute = async (u: any | null) => {
     if (!u) {
       setNeedsOnboarding(false);
       return;
     }
 
-    const { data, error } = await supabase
+    const profileQuery = supabase
       .from("profiles")
       .select("username, accent_color, email, onboarding_completed")
       .eq("id", u.id)
       .maybeSingle();
+
+    let data: any;
+    let error: any;
+    try {
+      const result = await withTimeout(
+        Promise.resolve(profileQuery),
+        PROFILE_INIT_TIMEOUT_MS,
+        "Profile initialization timed out"
+      );
+      data = result.data;
+      error = result.error;
+    } catch (profileError) {
+      // If profile bootstrap times out, allow user into app with safe fallback values.
+      if (isTimeoutError(profileError)) {
+        const email = u.email ?? "";
+        const username = (u.user_metadata?.username as string) || email.split("@")[0] || "User";
+        setUserData({ username, email });
+        setNeedsOnboarding(false);
+        return;
+      }
+      throw profileError;
+    }
 
     if (error) {
       console.error("profiles fetch error:", error);
@@ -127,20 +194,25 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-
-    // Safety timeout — if init hangs for any reason, force past loading screen
-    const safetyTimer = setTimeout(() => {
-      if (mounted && !isAuthReady) {
-        console.warn("Auth init timed out — forcing ready state");
-        setIsAuthReady(true);
+    const authWatchdog = setTimeout(() => {
+      if (!mounted) return;
+      // Recovery path: clear stale OAuth callback state and allow app to render.
+      if (window.location.search || window.location.hash || window.location.pathname !== "/") {
+        window.history.replaceState({}, document.title, "/");
       }
-    }, 3000);
+      sessionStorage.removeItem("spotify_pkce_code_verifier");
+      sessionStorage.removeItem("spotify_pkce_flow");
+      setAuthWatchdogTriggered(true);
+      setAuthInitError("Login is taking too long. Please retry.");
+      setIsAuthReady(true);
+    }, AUTH_INIT_TIMEOUT_MS + 10000);
 
     const init = async () => {
       try {
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
         const spotifyVerifier = sessionStorage.getItem("spotify_pkce_code_verifier");
+        const spotifyFlowMarker = sessionStorage.getItem("spotify_pkce_flow");
 
         // Clean URL immediately — remove stale code params and path fragments
         // This prevents SettingsPage from trying to re-process old Spotify callbacks
@@ -151,15 +223,14 @@ export default function App() {
         }
 
         // If this is a Spotify API callback (not Supabase social login), don't let Supabase touch it
-        if (code && spotifyVerifier) {
+        if (code && spotifyVerifier && spotifyFlowMarker === "api_connect") {
           // Navigate to settings to let SettingsPage handle the Spotify API callback
           // But first get the existing session
-          const { data } = await supabase.auth.getSession();
+          const { data } = await getSessionWithRetry();
           if (!mounted) return;
           setSession(data.session);
-          setIsAuthReady(true);
-          clearTimeout(safetyTimer);
           await syncProfileAndRoute(data.session?.user ?? null);
+          setAuthInitError(null);
           navigate("settings");
           return;
         }
@@ -167,15 +238,13 @@ export default function App() {
         // For Supabase OAuth / email verification:
         // detectSessionInUrl + flowType: "pkce" handles the code exchange automatically
         // Just wait for getSession to return the result
-        const { data, error } = await supabase.auth.getSession();
+        const { data, error } = await getSessionWithRetry();
         if (!mounted) return;
 
         if (error) console.error("getSession error:", error);
 
         const sess = data.session;
         setSession(sess);
-        setIsAuthReady(true);
-        clearTimeout(safetyTimer);
 
         // Clean up URL after session is processed
         if (window.location.search || window.location.hash || window.location.pathname !== "/") {
@@ -183,11 +252,25 @@ export default function App() {
         }
 
         await syncProfileAndRoute(sess?.user ?? null);
+        setAuthInitError(null);
       } catch (e) {
         console.error("init auth error:", e);
         if (mounted) {
+          if (window.location.search || window.location.hash || window.location.pathname !== "/") {
+            window.history.replaceState({}, document.title, "/");
+          }
+          if (isTimeoutError(e)) {
+            // Graceful fallback: treat as signed out instead of blocking app load.
+            setSession(null);
+            setNeedsOnboarding(false);
+            setAuthInitError(null);
+          } else {
+            setAuthInitError("Couldn't initialize your session. Please retry.");
+          }
+        }
+      } finally {
+        if (mounted) {
           setIsAuthReady(true);
-          clearTimeout(safetyTimer);
         }
       }
     };
@@ -197,13 +280,22 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       if (!mounted) return;
       setSession(newSession);
-      syncProfileAndRoute(newSession?.user ?? null);
+      try {
+        await syncProfileAndRoute(newSession?.user ?? null);
+        setAuthInitError(null);
+      } catch (error) {
+        console.error("auth state sync error:", error);
+        if (!isTimeoutError(error)) {
+          setAuthInitError("Couldn't refresh your account state. Please retry.");
+        }
+      }
 
       // Auto-link Spotify API connection when user signs in via Spotify OAuth
       if (
-        (_event === "SIGNED_IN" || _event === "TOKEN_REFRESHED") &&
+        _event === "SIGNED_IN" &&
         newSession?.user?.app_metadata?.provider === "spotify" &&
-        newSession.provider_token
+        newSession.provider_token &&
+        !isSpotifyAutolinkDisabled()
       ) {
         try {
           const user = newSession.user;
@@ -212,7 +304,9 @@ export default function App() {
             {
               user_id: user.id,
               access_token: newSession.provider_token,
-              refresh_token: newSession.provider_refresh_token ?? null,
+              ...(newSession.provider_refresh_token
+                ? { refresh_token: newSession.provider_refresh_token }
+                : {}),
               expires_at: new Date(
                 Date.now() + 3600 * 1000
               ).toISOString(),
@@ -231,23 +325,17 @@ export default function App() {
 
     return () => {
       mounted = false;
-      clearTimeout(safetyTimer);
+      clearTimeout(authWatchdog);
       sub.subscription.unsubscribe();
     };
   }, []);
 
   // 1) Restore local UI prefs/user data (runs once)
   useEffect(() => {
-    const savedUserData = localStorage.getItem("onchord_user_data");
     const savedAccentColor = localStorage.getItem("onchord_accent_color");
 
-    if (savedUserData) {
-      try {
-        setUserData(JSON.parse(savedUserData));
-      } catch {
-        localStorage.removeItem("onchord_user_data");
-      }
-    }
+    // Legacy key from older builds; avoid hydrating stale cross-account names.
+    localStorage.removeItem("onchord_user_data");
 
     if (savedAccentColor) setAccentColor(savedAccentColor);
   }, []);
@@ -458,7 +546,7 @@ const handleSubmitReview = async (reviewData: {
   visibility: "public" | "friends" | "private";
 }) => {
   const type: "album" | "track" = reviewMediaType === "song" ? "track" : "album";
-  const isPublic = reviewData.visibility !== "private"; // simple mapping for now
+  const isPublic = reviewData.visibility !== "private";
 
   try {
     if (reviewData.id) {
@@ -469,6 +557,7 @@ const handleSubmitReview = async (reviewData: {
         // your DB uses where_listened; keep mapping simple:
         whereListened: reviewData.listeningContext || undefined,
         favoriteTrack: reviewData.favoriteTrack || undefined,
+        visibility: reviewData.visibility,
         isPublic,
         type,
       });
@@ -500,6 +589,7 @@ const handleSubmitReview = async (reviewData: {
       whereListened: reviewData.listeningContext || undefined,
       favoriteTrack: reviewData.favoriteTrack || undefined,
 
+      visibility: reviewData.visibility,
       isPublic,
     });
 
@@ -524,8 +614,6 @@ const handleSubmitReview = async (reviewData: {
             onOpenAlbum={handleOpenAlbumModal}
             onEditReview={setEditingReview}
             reviews={userReviews}
-            isLoadingReviews={isLoadingReviews}
-            reviewsError={reviewsError}
           />
         );
       case "discover":
@@ -601,7 +689,7 @@ const handleSubmitReview = async (reviewData: {
         navigate("home");
         return <HomePage onNavigate={navigate} username={userData.username} onOpenAlbum={handleOpenAlbumModal} />;
       case "messages":
-        return <MessagingPage onBack={goBack} canGoBack={canGoBack} />;
+        return <MessagingPage onBack={goBack} canGoBack={canGoBack} onOpenAlbum={handleOpenAlbumModal} onNavigate={navigate} />;
       case "playlist":
         return (
           <CollaborativePlaylistsHub 
@@ -711,6 +799,30 @@ const handleSubmitReview = async (reviewData: {
   if (!isAuthReady) {
     return <LoadingScreen />;
   }
+
+  if (authInitError && !session?.user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="w-full max-w-md bg-card/80 backdrop-blur-xl rounded-2xl border border-border p-8 shadow-2xl text-center">
+          <h2 className="text-xl text-foreground mb-2">Connection Issue</h2>
+          <p className="text-muted-foreground mb-6">{authInitError}</p>
+          {authWatchdogTriggered ? (
+            <p className="text-xs text-muted-foreground mb-4">
+              We cleared stale login callback data so you can retry safely.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-medium hover:bg-primary/90 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Show auth page if not logged in
   if (!session?.user && !needsOnboarding) {
     return (
@@ -761,7 +873,7 @@ const handleSubmitReview = async (reviewData: {
       />
       
       {/* Main Content with Page Transitions */}
-      <main className={`transition-all duration-300 ${sidebarOpen ? 'md:ml-64' : 'md:ml-0'} p-4 md:pl-24 md:pr-8 md:pt-8 pb-24 md:pb-8 relative z-10`}>
+      <main className={`transition-all duration-300 ${sidebarOpen ? 'md:ml-64' : 'md:ml-0'} px-3 pt-3 md:pl-24 md:pr-8 md:pt-8 pb-20 md:pb-8 relative z-10`}>
         {/* Toggle Button - Fixed position - Only show when closed on desktop */}
         <AnimatePresence>
           {!sidebarOpen && (
@@ -792,7 +904,7 @@ const handleSubmitReview = async (reviewData: {
         </AnimatePresence>
 
         <motion.div 
-          className="max-w-6xl mx-auto"
+          className="max-w-[1280px] mx-auto"
           animate={{ 
             paddingLeft: sidebarOpen ? '1rem' : '0'
           }}
@@ -816,7 +928,7 @@ const handleSubmitReview = async (reviewData: {
       </main>
 
       {/* Quick Action Button */}
-      <QuickActionButton onAction={handleQuickAction} />
+      {currentPage !== "messages" && <QuickActionButton onAction={handleQuickAction} />}
 
       {/* Album Modal */}
       <AlbumModal 

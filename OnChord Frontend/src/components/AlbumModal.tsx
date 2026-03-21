@@ -79,6 +79,8 @@ function normaliseAlbum(raw: any) {
       popularity: raw.popularity,
       copyrights: raw.copyrights || [],
       _isSpotify: true,
+      // Treat Spotify 'single' or 'compilation' with 1 track as a single
+      _isSong: raw.album_type === "single" || (raw.album_type !== "album" && (raw.total_tracks || raw.tracks?.total || 0) === 1),
     };
   }
 
@@ -99,6 +101,10 @@ function normaliseAlbum(raw: any) {
     popularity: undefined,
     copyrights: [],
     _isSpotify: false,
+    // Detect singles: review type "track", explicit album_type, or title heuristic
+    _isSong: raw.type === "track" || raw.type === "single" ||
+             raw.album_type === "single" ||
+             String(raw.albumTitle || raw.title || "").toLowerCase().endsWith("- single"),
   };
 }
 
@@ -191,6 +197,24 @@ export function AlbumModal({ isOpen, onClose, albumData, loading, onOpenReviewMo
     );
   };
 
+  const handleShare = async () => {
+    if (!album) return;
+    const text = `${album.title} by ${album.artist}`;
+    const url = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: text, url });
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} — ${url}`);
+      toast.success("Copied to clipboard!", { description: text });
+    } catch {
+      toast.error("Could not copy link");
+    }
+  };
+
   const [activeTab, setActiveTab] = useState("reviews");
 
   // If no album data, show loading state
@@ -258,7 +282,7 @@ export function AlbumModal({ isOpen, onClose, albumData, loading, onOpenReviewMo
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row gap-6 md:gap-8">
                 {/* Album Cover */}
-                <div className="w-full md:w-56 lg:w-64 flex-shrink-0">
+                <div className="w-40 sm:w-full md:w-56 lg:w-64 flex-shrink-0 mx-auto md:mx-0">
                   <img
                     src={album.cover}
                     alt={album.title}
@@ -342,9 +366,10 @@ export function AlbumModal({ isOpen, onClose, albumData, loading, onOpenReviewMo
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex flex-wrap gap-3 pt-4">
+                  <div className="flex flex-wrap gap-2 md:gap-3 pt-2 md:pt-4">
                     <Button
-                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground text-sm"
+                      size="sm"
                       onClick={() => {
                         onOpenReviewModal?.(
                           album._isSong ? "song" : "album",
@@ -355,19 +380,20 @@ export function AlbumModal({ isOpen, onClose, albumData, loading, onOpenReviewMo
                         );
                       }}
                     >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Log / Review This
+                      <Plus className="w-4 h-4 mr-1.5" />
+                      Log / Review
                     </Button>
                     <Button
                       variant="outline"
-                      className="border-border"
+                      size="sm"
+                      className="border-border text-sm"
                       onClick={handleToggleFavourite}
                     >
-                      <Heart className="w-4 h-4 mr-2" />
-                      {isFavourite ? "Remove from" : "Add to"} Favorites
+                      <Heart className="w-4 h-4 mr-1.5" />
+                      {isFavourite ? "Unfavourite" : "Favourite"}
                     </Button>
-                    <Button variant="outline" className="border-border">
-                      <Share2 className="w-4 h-4 mr-2" />
+                    <Button variant="outline" size="sm" className="border-border text-sm" onClick={handleShare}>
+                      <Share2 className="w-4 h-4 mr-1.5" />
                       Share
                     </Button>
                   </div>

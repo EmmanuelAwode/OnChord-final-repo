@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getReviews, createReview, updateReviewApi, deleteReviewApi } from "./api/reviews";
 import { supabase } from "./supabaseClient";
+import { formatDateForDisplay } from "./localeFormatting";
 
 
 export function useFollowing() {
@@ -177,6 +178,7 @@ export interface Review {
   favoriteTrack?: string;
   trackDuration?: string;
   isPublic: boolean;
+  visibility?: "public" | "friends" | "private";
   editedAt?: string; // ISO timestamp of last edit
   isEdited?: boolean; // Flag to indicate if review has been edited
 }
@@ -240,7 +242,7 @@ export function useReviews() {
     if (diffDays === 1) return "1 day ago";
     if (diffDays < 7) return `${diffDays} days ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) !== 1 ? 's' : ''} ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatDateForDisplay(date, 'full');
   };
 
   const addReview = async (review: Omit<Review, "id" | "timestamp" | "date" | "likes" | "comments">) => {

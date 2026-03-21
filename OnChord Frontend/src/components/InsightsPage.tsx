@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Brain, Users, Sparkles, BarChart3, Music, TrendingUp, Disc, Headphones, Loader2 } from "lucide-react";
 import { Card } from "./ui/card";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { TasteMatchingPage } from "./TasteMatchingPage";
 import { PlaylistMoodPage } from "./PlaylistMoodPage";
 import { MusicPersonalityPage } from "./MusicPersonalityPage";
 import { getFriendsReviews, type Review } from "../lib/api/reviews";
-import { getListeningStats, type ListeningStats, type MonthlyListening, type GenreDistribution } from "../lib/api/insightsData";
+import { getListeningStats, type ListeningStats, type MonthlyListening } from "../lib/api/insightsData";
+import { checkMlServiceHealth, type MlServiceHealth } from "../lib/api/mlService";
 
 interface InsightsPageProps {
   onNavigate?: (page: string) => void;
@@ -18,9 +19,9 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState<ListeningStats | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyListening[]>([]);
-  const [genreData, setGenreData] = useState<GenreDistribution[]>([]);
   const [isRealData, setIsRealData] = useState(false);
   const [friendsReviews, setFriendsReviews] = useState<Review[]>([]);
+  const [mlHealth, setMlHealth] = useState<MlServiceHealth | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -35,7 +36,6 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
         console.log("[InsightsPage] Stats loaded:", statsResult);
         setStats(statsResult.stats);
         setMonthlyData(statsResult.monthlyData);
-        setGenreData(statsResult.genreDistribution);
         setIsRealData(statsResult.isRealData);
         
         console.log("[InsightsPage] Friend reviews loaded:", reviewsResult.length);
@@ -50,13 +50,18 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
           tracksPlayed: 0,
           artistsDiscovered: 0,
         });
-        setGenreData([]);
         setFriendsReviews([]);
       } finally {
         setIsLoading(false);
       }
     }
     loadData();
+  }, []);
+
+  useEffect(() => {
+    checkMlServiceHealth()
+      .then(setMlHealth)
+      .catch(() => setMlHealth(null));
   }, []);
 
   return (
@@ -73,6 +78,15 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
           Discover your musical personality, find taste matches, and analyze your listening moods
         </p>
       </div>
+
+      {mlHealth && !mlHealth.ml_features_available && (
+        <Card className="p-4 bg-amber-500/10 border-amber-500/30">
+          <p className="text-sm font-medium text-amber-500">Insights Running In Limited ML Mode</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Current mode: {mlHealth.inference_mode}. Some advanced insights may use fallback behavior.
+          </p>
+        </Card>
+      )}
 
       {/* Insights Tabs */}
       <Tabs defaultValue={defaultTab} className="w-full">
@@ -180,7 +194,7 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
             </div>
 
             {/* Charts */}
-            <div className="grid lg:grid-cols-2 gap-4 md:gap-6">
+            <div className="grid gap-4 md:gap-6">
               {/* Monthly Listening */}
               <Card className="p-4 md:p-6 bg-card border-border">
                 <h3 className="text-base md:text-lg text-foreground mb-3 md:mb-4">Monthly Listening</h3>
@@ -207,48 +221,6 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
                       <Bar dataKey="hours" fill="#A78BFA" radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                )}
-              </Card>
-
-              {/* Genre Distribution */}
-              <Card className="p-4 md:p-6 bg-card border-border">
-                <h3 className="text-base md:text-lg text-foreground mb-3 md:mb-4">Genre Distribution</h3>
-                {genreData.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground">
-                    <Disc className="w-12 h-12 mb-2 opacity-50" />
-                    <p className="text-sm">No genre data available</p>
-                    <p className="text-xs mt-1">Connect Spotify to see your genres</p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                    <Pie
-                      data={genreData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ genre, value }) => `${genre} ${value}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {genreData.map((entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={["#A78BFA", "#34D399", "#60A5FA", "#F472B6", "#FBBF24"][index % 5]}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#3B4252",
-                        border: "1px solid #4C566A",
-                        borderRadius: "8px",
-                        color: "#F3F4F6",
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
                 )}
               </Card>
             </div>

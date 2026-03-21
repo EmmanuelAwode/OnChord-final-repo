@@ -81,12 +81,14 @@ After deployment starts, go to each service and add environment variables:
 #### For `onchord-frontend`:
 | Variable | Value |
 |----------|-------|
-| `VITE_SUPABASE_URL` | `https://kyhvtuxtrdhizizkqqrb.supabase.co` |
-| `VITE_SUPABASE_ANON_KEY` | `sb_publishable_Qw0BH5ZoZgEVOsZ8HHXXJA_5jHqQHPw` |
-| `VITE_SPOTIFY_CLIENT_ID` | `9035284e549f4dfcb4aea82c19969525` |
+| `VITE_SUPABASE_URL` | `https://YOUR_PROJECT.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | `YOUR_SUPABASE_ANON_KEY` |
+| `VITE_SPOTIFY_CLIENT_ID` | `YOUR_SPOTIFY_CLIENT_ID` |
 | `VITE_SPOTIFY_REDIRECT_URI` | `https://YOUR-FRONTEND.onrender.com/settings` |
-| `VITE_TICKETMASTER_API_KEY` | `ABFNsBG8qs4JrpgELIeIJHAMoPd6IrQ7` |
+| `VITE_TICKETMASTER_API_KEY` | `YOUR_TICKETMASTER_API_KEY` |
 | `VITE_ML_SERVICE_URL` | `https://YOUR-ML-SERVICE.onrender.com` |
+
+> Security note: never commit real API keys or tokens to git history. Configure them only in Render/Supabase secret settings.
 
 > ⚠️ Replace `YOUR-FRONTEND` and `YOUR-ML-SERVICE` with your actual Render URLs!
 

@@ -198,7 +198,7 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
         console.log('No Ticketmaster events found');
         setEvents([]);
         setHasMore(false);
-        toast.info('No events found. Check your Ticketmaster API key in .env for live events.');
+        toast.info('No upcoming events found right now. Try search or check back later.');
       } else {
         // Filter out duplicates
         const newEvents = result.events.filter(event => !loadedEventIds.current.has(event.id));

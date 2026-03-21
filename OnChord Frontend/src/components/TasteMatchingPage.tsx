@@ -7,7 +7,7 @@ import { Users, Sparkles, UserPlus, UserCheck, Loader2, AlertCircle, RefreshCw, 
 import { useSupabaseFollows } from "../lib/useSupabaseFollows";
 import { supabase } from "../lib/supabaseClient";
 import { toast } from "sonner";
-import { checkMlServiceHealth, getEnhancedTasteSimilarity, EnhancedTasteResponse } from "../lib/api/mlService";
+import { checkMlServiceHealth, getEnhancedTasteSimilarity, type MlServiceHealth } from "../lib/api/mlService";
 import { type Profile } from "../lib/api/profiles";
 import { getUserMusicData, type UserMusicData } from "../lib/api/tasteMatching";
 
@@ -25,6 +25,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
   
   // ML Service state
   const [mlServiceAvailable, setMlServiceAvailable] = useState<boolean | null>(null);
+  const [mlHealth, setMlHealth] = useState<MlServiceHealth | null>(null);
 
   // User music data and compatibility
   const [myMusicData, setMyMusicData] = useState<UserMusicData | null>(null);
@@ -87,8 +88,11 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
     async function initMlService() {
       try {
         const health = await checkMlServiceHealth();
-        setMlServiceAvailable(health.taste_model_loaded);
+        setMlHealth(health);
+        // Advanced ML is available only when full ML features are enabled.
+        setMlServiceAvailable(health.ml_features_available);
       } catch {
+        setMlHealth(null);
         setMlServiceAvailable(false);
       }
     }
@@ -196,7 +200,11 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
     setIsComputingAll(false);
     
     const matchCount = Object.values(newCompatibilities).filter(c => c.similarity > 0).length;
-    toast.success(`Found ${matchCount} potential matches based on your music taste!`);
+    if (mlServiceAvailable) {
+      toast.success(`Found ${matchCount} potential matches using advanced ML taste analysis!`);
+    } else {
+      toast.success(`Found ${matchCount} potential matches using basic similarity mode.`);
+    }
   };
   
   // Filter out current user from real users
@@ -251,9 +259,9 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
           <div className="flex items-center gap-3 p-4 bg-amber-500/10 rounded-lg">
             <AlertCircle className="w-5 h-5 text-amber-500" />
             <div>
-              <p className="text-sm font-medium text-amber-500">ML Features Limited</p>
+              <p className="text-sm font-medium text-amber-500">Advanced ML Limited</p>
               <p className="text-xs text-muted-foreground">
-                Advanced taste matching is temporarily unavailable. Basic matching still works!
+                Running in {mlHealth?.inference_mode ?? "fallback"} mode. Basic matching still works.
               </p>
             </div>
           </div>
@@ -268,7 +276,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
       </Card>
 
       {/* My Music Profile */}
-      {mlServiceAvailable && currentUserId && (
+      {currentUserId && (
         <Card className="p-4 bg-card border-border">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex-1">
@@ -298,14 +306,16 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
               ) : (
                 <>
                   <RefreshCw className="w-4 h-4 mr-2" />
-                  Find Matches
+                  {mlServiceAvailable ? "Find ML Matches" : "Find Basic Matches"}
                 </>
               )}
             </Button>
           </div>
           {Object.keys(userCompatibilities).length > 0 && (
             <p className="mt-2 text-xs text-primary">
-              ✨ Real taste matching based on your reviews & favorites
+              {mlServiceAvailable
+                ? "Advanced taste matching based on your reviews and favorites"
+                : "Basic taste matching based on shared tracks, albums, and artists"}
             </p>
           )}
         </Card>
@@ -460,8 +470,9 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
           <div className="flex-1">
             <h3 className="text-foreground mb-2">How It Works</h3>
             <p className="text-muted-foreground text-sm mb-3">
-              Our machine learning algorithm analyzes your listening patterns, favorite genres, and review history 
-              to find users with similar taste. Higher compatibility means more shared musical preferences!
+              {mlServiceAvailable
+                ? "Our machine learning algorithm analyzes listening patterns, favorite genres, and review history to find users with similar taste."
+                : "OnChord is currently using basic similarity mode based on shared tracks, albums, and artists while advanced ML is limited."}
             </p>
             <p className="text-xs text-muted-foreground">
               Note: OnChord is focused on friendship and music discovery, not dating.

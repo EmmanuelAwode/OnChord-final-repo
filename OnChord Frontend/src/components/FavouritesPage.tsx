@@ -9,6 +9,7 @@ import { Heart, Music, Disc3, Play, Trash2, Calendar, ArrowUpDown } from "lucide
 import { useFavourites } from "../lib/useFavourites";
 import { EmptyState } from "./EmptyState";
 import { toast } from "sonner@2.0.3";
+import { formatDateForDisplay } from "../lib/localeFormatting";
 
 interface FavouritesPageProps {
   onOpenAlbum?: (albumId?: string) => void;
@@ -58,7 +59,7 @@ export function FavouritesPage({ onOpenAlbum }: FavouritesPageProps) {
     if (diffDays < 7) return `${diffDays} days ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
     if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
-    return date.toLocaleDateString();
+    return formatDateForDisplay(date, "short");
   };
 
   return (

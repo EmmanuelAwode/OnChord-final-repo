@@ -29,6 +29,7 @@
             "@radix-ui/react-toggle": "^1.1.2",
             "@radix-ui/react-toggle-group": "^1.1.2",
             "@radix-ui/react-tooltip": "^1.1.8",
+            "@sentry/react": "^10.43.0",
             "@supabase/supabase-js": "^2.88.0",
             "class-variance-authority": "^0.7.1",
             "clsx": "*",
@@ -46,18 +47,35 @@
             "recharts": "^2.15.2",
             "sonner": "^2.0.3",
             "tailwind-merge": "*",
-            "vaul": "^1.1.2"
+            "vaul": "^1.1.2",
+            "zod": "^4.3.6"
       },
       "devDependencies": {
+            "@eslint/js": "^9.39.4",
+            "@testing-library/jest-dom": "^6.9.1",
+            "@testing-library/react": "^16.3.2",
             "@types/node": "^20.19.30",
             "@types/react": "^19.2.10",
             "@types/react-dom": "^19.2.3",
             "@vitejs/plugin-react-swc": "^3.10.2",
-            "vite": "6.3.5"
+            "eslint": "^9.39.4",
+            "eslint-plugin-react-hooks": "^7.0.1",
+            "eslint-plugin-react-refresh": "^0.5.2",
+            "globals": "^17.4.0",
+            "jsdom": "^29.0.0",
+            "typescript": "^5.9.3",
+            "typescript-eslint": "^8.57.1",
+            "vite": "6.3.5",
+            "vitest": "^4.1.0"
       },
       "scripts": {
             "dev": "vite",
             "build": "vite build",
+            "typecheck": "tsc --noEmit -p tsconfig.ci.json",
+            "lint": "eslint \"src/**/*.{ts,tsx}\"",
+            "test": "vitest run",
+            "test:smoke": "vitest run src/lib/__tests__/env.test.ts",
+            "check": "npm run typecheck && npm run lint && npm run test:smoke && npm run build",
             "seed:profiles": "npx tsx scripts/seed-test-profiles.ts"
       }
 }

@@ -65,6 +65,23 @@ const languages = [
   { code: "zh", name: "中文", flag: "🇨🇳" },
 ];
 
+const regions = [
+  { code: "auto", name: "Automatic (Device region)", flag: "🌐" },
+  { code: "US", name: "United States", flag: "🇺🇸" },
+  { code: "GB", name: "United Kingdom", flag: "🇬🇧" },
+  { code: "CA", name: "Canada", flag: "🇨🇦" },
+  { code: "AU", name: "Australia", flag: "🇦🇺" },
+  { code: "DE", name: "Germany", flag: "🇩🇪" },
+  { code: "FR", name: "France", flag: "🇫🇷" },
+  { code: "ES", name: "Spain", flag: "🇪🇸" },
+  { code: "IT", name: "Italy", flag: "🇮🇹" },
+  { code: "BR", name: "Brazil", flag: "🇧🇷" },
+  { code: "JP", name: "Japan", flag: "🇯🇵" },
+  { code: "KR", name: "South Korea", flag: "🇰🇷" },
+  { code: "CN", name: "China", flag: "🇨🇳" },
+  { code: "IN", name: "India", flag: "🇮🇳" },
+];
+
 const dateFormats = [
   { id: "mdy", label: "MM/DD/YYYY", example: "10/01/2025" },
   { id: "dmy", label: "DD/MM/YYYY", example: "01/10/2025" },
@@ -104,6 +121,7 @@ export function SettingsPage({
   // Spotify connection state
   const [spotifyConnection, setSpotifyConnection] = useState<any>(null);
   const [isLoadingSpotify, setIsLoadingSpotify] = useState(true);
+  const [isDisconnectingSpotify, setIsDisconnectingSpotify] = useState(false);
   
   // User ID state
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -133,8 +151,9 @@ export function SettingsPage({
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     const hasVerifier = sessionStorage.getItem("spotify_pkce_code_verifier");
+    const flowMarker = sessionStorage.getItem("spotify_pkce_flow");
     
-    if (code && hasVerifier) {
+    if (code && hasVerifier && flowMarker === "api_connect") {
       handleSpotifyOAuthCallback(code);
       // Remove code from URL without reloading
       const cleanUrl = new URL(window.location.href);
@@ -176,15 +195,20 @@ export function SettingsPage({
   
   async function handleDisconnectSpotify() {
     console.log("handleDisconnectSpotify called");
+    if (isDisconnectingSpotify) return;
+    setIsDisconnectingSpotify(true);
     try {
       console.log("Calling disconnectSpotify...");
       await disconnectSpotify();
       console.log("disconnectSpotify completed");
+      await loadSpotifyConnection();
       setSpotifyConnection(null);
       toast.success("Spotify disconnected");
     } catch (error) {
       console.error("Failed to disconnect Spotify:", error);
       toast.error("Failed to disconnect Spotify");
+    } finally {
+      setIsDisconnectingSpotify(false);
     }
   }
   
@@ -233,9 +257,35 @@ export function SettingsPage({
 
   // Language & Region
   const [language, setLanguage] = useState(() => loadSetting("language", "en"));
+  const [region, setRegion] = useState(() => loadSetting("region", "auto"));
   const [dateFormat, setDateFormat] = useState(() => loadSetting("dateFormat", "mdy"));
   const [timeFormat, setTimeFormat] = useState(() => loadSetting("timeFormat", "12h"));
   const [timezone, setTimezone] = useState(() => loadSetting("timezone", "auto"));
+  const [dateTimePreview, setDateTimePreview] = useState("");
+
+  const availableTimezones = (() => {
+    try {
+      if (typeof Intl !== "undefined" && typeof (Intl as any).supportedValuesOf === "function") {
+        return (Intl as any).supportedValuesOf("timeZone") as string[];
+      }
+    } catch {
+      // Fallback handled below.
+    }
+
+    return [
+      "UTC",
+      "America/New_York",
+      "America/Chicago",
+      "America/Denver",
+      "America/Los_Angeles",
+      "Europe/London",
+      "Europe/Paris",
+      "Asia/Tokyo",
+      "Asia/Seoul",
+      "Asia/Shanghai",
+      "Australia/Sydney",
+    ];
+  })();
 
   // Audio settings
   const [audioQuality, setAudioQuality] = useState(() => loadSetting("audioQuality", "high"));
@@ -285,6 +335,7 @@ export function SettingsPage({
   useEffect(() => { saveSetting("reduceMotion", reduceMotion); }, [reduceMotion]);
   useEffect(() => { saveSetting("highContrast", highContrast); }, [highContrast]);
   useEffect(() => { saveSetting("language", language); }, [language]);
+  useEffect(() => { saveSetting("region", region); }, [region]);
   useEffect(() => { saveSetting("dateFormat", dateFormat); }, [dateFormat]);
   useEffect(() => { saveSetting("timeFormat", timeFormat); }, [timeFormat]);
   useEffect(() => { saveSetting("timezone", timezone); }, [timezone]);
@@ -327,14 +378,84 @@ export function SettingsPage({
     document.documentElement.setAttribute("data-density", displayDensity);
   }, [displayDensity]);
 
+  // Migrate legacy timezone values from earlier settings versions.
+  useEffect(() => {
+    const legacyToIana: Record<string, string> = {
+      utc: "UTC",
+      est: "America/New_York",
+      pst: "America/Los_Angeles",
+      cet: "Europe/Paris",
+      jst: "Asia/Tokyo",
+    };
+
+    const mapped = legacyToIana[timezone];
+    if (mapped) {
+      setTimezone(mapped);
+    }
+  }, [timezone]);
+
   // Apply font size on mount
   useEffect(() => {
     document.documentElement.style.setProperty("--font-size", `${fontSize[0]}px`);
   }, []);
 
+  // Apply language/locale settings immediately.
+  useEffect(() => {
+    const browserLocale = navigator.language || "en-US";
+    const detectedRegion = browserLocale.split("-")[1] || "US";
+    const effectiveRegion = region === "auto" ? detectedRegion : region;
+    const locale = `${language}-${effectiveRegion}`;
+
+    document.documentElement.lang = language;
+    document.documentElement.setAttribute("data-locale", locale);
+  }, [language, region]);
+
+  // Build a live preview for date/time settings using selected locale + timezone.
+  useEffect(() => {
+    const browserLocale = navigator.language || "en-US";
+    const detectedRegion = browserLocale.split("-")[1] || "US";
+    const effectiveRegion = region === "auto" ? detectedRegion : region;
+    const locale = `${language}-${effectiveRegion}`;
+
+    const resolvedTimezone =
+      timezone === "auto"
+        ? Intl.DateTimeFormat().resolvedOptions().timeZone
+        : timezone;
+
+    const sampleDate = new Date("2026-03-15T14:30:00");
+
+    const dateOptionsByFormat: Record<string, Intl.DateTimeFormatOptions> = {
+      mdy: { month: "2-digit", day: "2-digit", year: "numeric" },
+      dmy: { day: "2-digit", month: "2-digit", year: "numeric" },
+      ymd: { year: "numeric", month: "2-digit", day: "2-digit" },
+    };
+
+    const previewDate = new Intl.DateTimeFormat(locale, {
+      ...(dateOptionsByFormat[dateFormat] || dateOptionsByFormat.mdy),
+      timeZone: resolvedTimezone,
+    }).format(sampleDate);
+
+    const previewTime = new Intl.DateTimeFormat(locale, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: timeFormat === "12h",
+      timeZone: resolvedTimezone,
+      timeZoneName: "short",
+    }).format(sampleDate);
+
+    setDateTimePreview(`${previewDate} ${previewTime}`);
+  }, [language, region, dateFormat, timeFormat, timezone]);
+
   // Modals
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
+
+  // Security - password change
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   const handleThemeChange = (mode: "light" | "dark" | "auto") => {
     setThemeMode(mode);
@@ -355,6 +476,69 @@ export function SettingsPage({
     setTimeout(() => {
       document.body.classList.remove('font-transition-active');
     }, 600);
+  };
+
+  const handlePasswordChange = async () => {
+    if (!newPassword || !confirmPassword) {
+      toast.error("Please fill in all required password fields");
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      toast.error("New password must be at least 8 characters");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("New password and confirmation do not match");
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+
+    try {
+      // Re-authenticate for email/password users before changing credentials.
+      if (userProvider === "email") {
+        if (!userEmail) {
+          toast.error("No email found for this account");
+          return;
+        }
+
+        if (!currentPassword) {
+          toast.error("Please enter your current password");
+          return;
+        }
+
+        const { error: reauthError } = await supabase.auth.signInWithPassword({
+          email: userEmail,
+          password: currentPassword,
+        });
+
+        if (reauthError) {
+          toast.error("Current password is incorrect");
+          return;
+        }
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowPasswordForm(false);
+      toast.success("Password updated successfully");
+    } catch (error: any) {
+      console.error("Failed to change password:", error);
+      toast.error(error?.message || "Failed to update password");
+    } finally {
+      setIsUpdatingPassword(false);
+    }
   };
 
   return (
@@ -571,8 +755,30 @@ export function SettingsPage({
                   </SelectContent>
                 </Select>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Changes will take effect after restarting the app
+                  Applied immediately across the app where locale settings are supported
                 </p>
+              </div>
+
+              <Separator className="bg-border" />
+
+              {/* Region Selection */}
+              <div>
+                <Label className="text-foreground mb-3 block">Region</Label>
+                <Select value={region} onValueChange={setRegion}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {regions.map((item) => (
+                      <SelectItem key={item.code} value={item.code}>
+                        <span className="flex items-center gap-2">
+                          <span>{item.flag}</span>
+                          <span>{item.name}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <Separator className="bg-border" />
@@ -624,13 +830,14 @@ export function SettingsPage({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto">Automatic (Detect from device)</SelectItem>
-                    <SelectItem value="utc">UTC (Coordinated Universal Time)</SelectItem>
-                    <SelectItem value="est">EST (Eastern Standard Time)</SelectItem>
-                    <SelectItem value="pst">PST (Pacific Standard Time)</SelectItem>
-                    <SelectItem value="cet">CET (Central European Time)</SelectItem>
-                    <SelectItem value="jst">JST (Japan Standard Time)</SelectItem>
+                    {availableTimezones.map((tz) => (
+                      <SelectItem key={tz} value={tz}>
+                        {tz}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground mt-2">Preview: {dateTimePreview}</p>
               </div>
             </div>
           </Card>
@@ -1008,8 +1215,9 @@ export function SettingsPage({
                             console.log("Disconnect clicked");
                             handleDisconnectSpotify();
                           }}
+                          disabled={isDisconnectingSpotify}
                         >
-                          Disconnect
+                          {isDisconnectingSpotify ? "Disconnecting..." : "Disconnect"}
                         </Button>
                       </div>
                     ) : (
@@ -1024,21 +1232,6 @@ export function SettingsPage({
                     )}
                   </div>
                   
-                  <div className="flex items-center justify-between p-4 bg-background rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-chart-4/20 p-2 rounded-lg">
-                        <svg className="w-5 h-5 text-chart-4" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-foreground">Instagram</p>
-                        <p className="text-sm text-muted-foreground">Coming soon</p>
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="text-muted-foreground border-muted-foreground/20">Soon</Badge>
-                  </div>
-
                   <div className="p-4 bg-muted/30 rounded-lg border border-border">
                     <p className="text-sm text-muted-foreground">
                       Connect your Spotify account to access real music data, search for albums, and enable personalized features.
@@ -1053,20 +1246,83 @@ export function SettingsPage({
               <div>
                 <Label className="text-foreground mb-3 block">Security</Label>
                 <div className="space-y-3">
-                  <Button variant="outline" className="w-full justify-between border-border">
+                  <Button
+                    variant="outline"
+                    className="w-full justify-between border-border"
+                    onClick={() => setShowPasswordForm((prev) => !prev)}
+                  >
                     <span className="flex items-center gap-2">
                       <Lock className="w-4 h-4" />
                       Change Password
                     </span>
                     <ChevronRight className="w-4 h-4" />
                   </Button>
-                  <Button variant="outline" className="w-full justify-between border-border">
-                    <span className="flex items-center gap-2">
-                      <Shield className="w-4 h-4" />
-                      Two-Factor Authentication
-                    </span>
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
+
+                  {showPasswordForm && (
+                    <div className="p-4 rounded-lg border border-border bg-muted/30 space-y-3 animate-fade-in">
+                      {userProvider === "email" ? (
+                        <div className="space-y-2">
+                          <Label className="text-sm text-foreground">Current Password</Label>
+                          <Input
+                            type="password"
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            placeholder="Enter current password"
+                          />
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          You signed in with {userProvider === "spotify" ? "Spotify" : "social login"}. Set a new password to enable email/password login.
+                        </p>
+                      )}
+
+                      <div className="space-y-2">
+                        <Label className="text-sm text-foreground">New Password</Label>
+                        <Input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="At least 8 characters"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm text-foreground">Confirm New Password</Label>
+                        <Input
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="Re-enter new password"
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-1">
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            setShowPasswordForm(false);
+                            setCurrentPassword("");
+                            setNewPassword("");
+                            setConfirmPassword("");
+                          }}
+                          disabled={isUpdatingPassword}
+                        >
+                          Cancel
+                        </Button>
+                        <Button onClick={handlePasswordChange} disabled={isUpdatingPassword}>
+                          {isUpdatingPassword ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Updating...
+                            </>
+                          ) : (
+                            "Update Password"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   <Button variant="outline" className="w-full justify-between border-border">
                     <span className="flex items-center gap-2">
                       <Eye className="w-4 h-4" />

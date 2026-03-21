@@ -6,11 +6,14 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
-import { UserPlus, Share2, Music, Clock, Tag, Sparkles, MessageSquare, Send, Search, Plus, Image, Smile, X, Loader2 } from "lucide-react";
-import { toast } from "sonner@2.0.3";
+import { UserPlus, Share2, Music, Clock, Sparkles, MessageSquare, Send, Search, Plus, Image, Smile, X, Loader2, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
 import { searchAlbums } from "../lib/api/musicSearch";
+import { getFollowing } from "../lib/api/follows";
+import { getProfiles } from "../lib/api/profiles";
+import { supabase } from "../lib/supabaseClient";
 
 interface Album {
   id: string;
@@ -19,6 +22,40 @@ interface Album {
   cover: string;
   year?: string;
   genre?: string;
+}
+
+interface PlaylistTrack {
+  id: string;
+  title: string;
+  artist: string;
+  addedBy: string;
+  timestamp: string;
+  cover?: string;
+  albumCover?: string;
+  album?: string;
+  previewUrl?: string;
+  spotifyUrl?: string;
+  appleMusicUrl?: string;
+}
+
+interface ChatTrack {
+  title: string;
+  artist: string;
+  cover: string;
+  rating?: number;
+}
+
+interface ChatMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  message: string;
+  timestamp: string;
+  type: "text" | "image" | "gif" | "track";
+  imageUrl?: string;
+  gifUrl?: string;
+  track?: ChatTrack;
 }
 
 interface CollaborativePlaylistPageProps {
@@ -39,12 +76,19 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const [showAddTrackModal, setShowAddTrackModal] = useState(false);
   const [showAddMoodModal, setShowAddMoodModal] = useState(false);
   const [showGifModal, setShowGifModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [inviteSearchQuery, setInviteSearchQuery] = useState("");
+  const [inviteFriends, setInviteFriends] = useState<Array<{ id: string; name: string; avatar: string }>>([]);
+  const [selectedInvitees, setSelectedInvitees] = useState<string[]>([]);
+  const [isLoadingInviteFriends, setIsLoadingInviteFriends] = useState(false);
+  const [isSendingInvites, setIsSendingInvites] = useState(false);
+  const [isDeletingPlaylist, setIsDeletingPlaylist] = useState(false);
   const [newMood, setNewMood] = useState("");
   const [gifSearchQuery, setGifSearchQuery] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showShareTrackModal, setShowShareTrackModal] = useState(false);
-  const [tracks, setTracks] = useState(playlist?.tracks || []);
+  const [tracks, setTracks] = useState<PlaylistTrack[]>((playlist?.tracks || []) as PlaylistTrack[]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [searchResults, setSearchResults] = useState<Album[]>([]);
@@ -78,12 +122,12 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   }, [searchQuery]);
   
   // Different messages for each playlist (start empty, real messages would come from backend)
-  const getInitialMessages = (_playlistId: string) => {
-    // In a real implementation, messages would be fetched from Supabase
+  const getInitialMessages = (_playlistId: string): ChatMessage[] => {
+    // In a real implementation, messages would be fetched from Supabase.
     return [];
   };
 
-  const [messages, setMessages] = useState(getInitialMessages(playlistId || "default"));
+  const [messages, setMessages] = useState<ChatMessage[]>(getInitialMessages(playlistId || "default"));
 
   // Scroll to bottom when messages change
   const scrollToBottom = (smooth = true) => {
@@ -101,6 +145,51 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     setTimeout(() => scrollToBottom(false), 50);
   }, []);
 
+  // Load followed users for invite flow.
+  useEffect(() => {
+    if (!profile?.id) {
+      setInviteFriends([]);
+      return;
+    }
+
+    let active = true;
+
+    async function loadInviteCandidates() {
+      setIsLoadingInviteFriends(true);
+      try {
+        const followingIds = await getFollowing();
+        if (!active) return;
+
+        if (followingIds.length === 0) {
+          setInviteFriends([]);
+          return;
+        }
+
+        const followingProfiles = await getProfiles(followingIds);
+        if (!active) return;
+
+        setInviteFriends(
+          followingProfiles.map((f) => ({
+            id: f.id,
+            name: f.display_name || f.username || "Music Lover",
+            avatar: f.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${f.id}`,
+          }))
+        );
+      } catch (error) {
+        console.error("Failed to load invite friends:", error);
+        if (active) setInviteFriends([]);
+      } finally {
+        if (active) setIsLoadingInviteFriends(false);
+      }
+    }
+
+    loadInviteCandidates();
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.id]);
+
   // Scroll to bottom when new messages are added
   useEffect(() => {
     scrollToBottom(true);
@@ -109,7 +198,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const handleSendMessage = () => {
     if (!newMessage.trim() && !selectedImage) return;
     
-    const msg = {
+    const msg: ChatMessage = {
       id: `msg${Date.now()}`,
       userId: profile?.id || "current-user",
       userName: profile?.display_name || profile?.username || "You",
@@ -119,14 +208,14 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       type: selectedImage ? "image" : "text",
       imageUrl: selectedImage || undefined,
     };
-    
-    setMessages([...messages, msg]);
+
+    setMessages((prev) => [...prev, msg]);
     setNewMessage("");
     setSelectedImage(null);
   };
 
   const handleSendGif = (gifUrl: string) => {
-    const msg = {
+    const msg: ChatMessage = {
       id: `msg${Date.now()}`,
       userId: profile?.id || "current-user",
       userName: profile?.display_name || profile?.username || "You",
@@ -136,8 +225,8 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       type: "gif",
       gifUrl: gifUrl,
     };
-    
-    setMessages([...messages, msg]);
+
+    setMessages((prev) => [...prev, msg]);
     setShowGifModal(false);
     setGifSearchQuery("");
     toast.success("GIF sent!");
@@ -169,7 +258,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   };
 
   const handleShareTrack = (album: Album) => {
-    const msg = {
+    const msg: ChatMessage = {
       id: `msg${Date.now()}`,
       userId: profile?.id || "current-user",
       userName: profile?.display_name || profile?.username || "You",
@@ -184,8 +273,8 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
         rating: 0,
       },
     };
-    
-    setMessages([...messages, msg]);
+
+    setMessages((prev) => [...prev, msg]);
     setShowShareTrackModal(false);
     setSearchQuery("");
     toast.success(`Shared "${album.title}"!`);
@@ -266,6 +355,116 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     setNewMood("");
     toast.success(`Added "${mood}" mood!`);
   };
+
+  const toggleInviteSelection = (friendId: string) => {
+    setSelectedInvitees((prev) =>
+      prev.includes(friendId) ? prev.filter((id) => id !== friendId) : [...prev, friendId]
+    );
+  };
+
+  const handleInviteFriends = async () => {
+    if (!playlist?.id) {
+      toast.error("Playlist not found");
+      return;
+    }
+
+    if (selectedInvitees.length === 0) {
+      toast.error("Select at least one person to invite");
+      return;
+    }
+
+    const existingContributorIds = new Set((playlist?.contributors || []).map((c: any) => c.id));
+    const filteredInvitees = selectedInvitees.filter((id) => !existingContributorIds.has(id));
+
+    if (filteredInvitees.length === 0) {
+      toast.error("Selected users are already collaborators");
+      return;
+    }
+
+    setIsSendingInvites(true);
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const currentUserId = session.session?.user?.id;
+      if (!currentUserId) {
+        toast.error("Please sign in to send invites");
+        return;
+      }
+
+      const inviterName = profile?.display_name || profile?.username || "A user";
+      const inviterAvatar = profile?.avatar_url || null;
+
+      const inviteRows = filteredInvitees.map((inviteeId) => ({
+        user_id: inviteeId,
+        type: "playlist_invite",
+        title: "Playlist collaboration invite",
+        message: `${inviterName} invited you to collaborate on \"${playlist.title}\".`,
+        action_user_id: currentUserId,
+        action_user_name: inviterName,
+        action_user_avatar: inviterAvatar,
+        playlist_id: playlist.id,
+        is_read: false,
+      }));
+
+      const { error } = await supabase.from("notifications").insert(inviteRows);
+      if (error) throw error;
+
+      const updatedPlaylists = playlists.map((p) =>
+        p.id === playlist.id
+          ? {
+              ...p,
+              pendingInviteCount: (p.pendingInviteCount || 0) + filteredInvitees.length,
+              lastUpdated: "Just now",
+            }
+          : p
+      );
+      setPlaylists(updatedPlaylists);
+
+      toast.success(`Sent ${filteredInvitees.length} invite${filteredInvitees.length > 1 ? "s" : ""}`);
+      setShowInviteModal(false);
+      setSelectedInvitees([]);
+      setInviteSearchQuery("");
+    } catch (error) {
+      console.error("Failed to send invites:", error);
+      toast.error("Failed to send invites. Please try again.");
+    } finally {
+      setIsSendingInvites(false);
+    }
+  };
+
+  const handleDeletePlaylist = async () => {
+    if (!playlist?.id) return;
+
+    const confirmed = window.confirm(`Delete \"${playlist.title}\"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setIsDeletingPlaylist(true);
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        playlist.id
+      );
+
+      if (isUuid) {
+        const { error } = await supabase.from("collaborative_playlists").delete().eq("id", playlist.id);
+        if (error) throw error;
+      }
+
+      setPlaylists(playlists.filter((p) => p.id !== playlist.id));
+      toast.success("Collaborative playlist deleted");
+      if (onBack) onBack();
+      else onNavigate?.("your-space-collab");
+    } catch (error) {
+      console.error("Failed to delete collaborative playlist:", error);
+      toast.error("Failed to delete playlist. You may not have permission.");
+    } finally {
+      setIsDeletingPlaylist(false);
+    }
+  };
+
+  const filteredInviteFriends = inviteFriends.filter((friend) => {
+    if (!inviteSearchQuery.trim()) return true;
+    const q = inviteSearchQuery.toLowerCase();
+    return friend.name.toLowerCase().includes(q);
+  });
 
   const handleRemoveMood = (moodToRemove: string) => {
     const updatedPlaylists = playlists.map(p => 
@@ -354,7 +553,10 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                     </div>
                   </div>
                 ))}
-                <button className="w-10 h-10 rounded-full border-2 border-dashed border-primary flex items-center justify-center hover:bg-primary/10 transition shadow-md hover:shadow-lg">
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="w-10 h-10 rounded-full border-2 border-dashed border-primary flex items-center justify-center hover:bg-primary/10 transition shadow-md hover:shadow-lg"
+                >
                   <UserPlus className="w-4 h-4 text-primary" />
                 </button>
               </div>
@@ -362,13 +564,25 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
 
             {/* Actions */}
             <div className="flex flex-wrap gap-3">
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg hover:scale-105 transition-all">
+              <Button
+                className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg hover:scale-105 transition-all"
+                onClick={() => setShowInviteModal(true)}
+              >
                 <UserPlus className="w-4 h-4 mr-2" />
                 Invite Friends
               </Button>
               <Button variant="outline" className="border-border">
                 <Share2 className="w-4 h-4 mr-2" />
                 Share
+              </Button>
+              <Button
+                variant="outline"
+                className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={handleDeletePlaylist}
+                disabled={isDeletingPlaylist}
+              >
+                {isDeletingPlaylist ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                Delete Playlist
               </Button>
             </div>
 
@@ -655,6 +869,100 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Add Track Modal */}
+      <Dialog open={showInviteModal} onOpenChange={setShowInviteModal}>
+        <DialogContent className="bg-card border-border max-w-xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">Invite Friends</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Invite people you follow to collaborate on this playlist
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search followed users..."
+                value={inviteSearchQuery}
+                onChange={(e) => setInviteSearchQuery(e.target.value)}
+                className="pl-10 bg-background border-border"
+              />
+            </div>
+
+            <div className="space-y-2 max-h-72 overflow-y-auto nav-scroll">
+              {isLoadingInviteFriends && (
+                <div className="p-4 text-center text-sm text-muted-foreground">Loading followed users...</div>
+              )}
+
+              {!isLoadingInviteFriends && filteredInviteFriends.length === 0 && (
+                <div className="p-4 text-center text-sm text-muted-foreground border border-border rounded-lg bg-background">
+                  No followed users found to invite.
+                </div>
+              )}
+
+              {!isLoadingInviteFriends && filteredInviteFriends.map((friend) => {
+                const isAlreadyContributor = (playlist?.contributors || []).some((c: any) => c.id === friend.id);
+                const isSelected = selectedInvitees.includes(friend.id);
+
+                return (
+                  <button
+                    key={friend.id}
+                    type="button"
+                    disabled={isAlreadyContributor}
+                    onClick={() => toggleInviteSelection(friend.id)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-lg border transition text-left ${
+                      isAlreadyContributor
+                        ? "border-border/50 bg-muted/30 opacity-60 cursor-not-allowed"
+                        : isSelected
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:border-primary/50"
+                    }`}
+                  >
+                    <Avatar className="w-10 h-10">
+                      <img src={friend.avatar} alt={friend.name} className="object-cover" />
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-foreground truncate">{friend.name}</p>
+                      <p className="text-xs text-muted-foreground">{isAlreadyContributor ? "Already a collaborator" : "Tap to select"}</p>
+                    </div>
+                    {isSelected && !isAlreadyContributor && (
+                      <Badge className="bg-primary text-primary-foreground border-0">Selected</Badge>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowInviteModal(false);
+                  setInviteSearchQuery("");
+                  setSelectedInvitees([]);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleInviteFriends} disabled={isSendingInvites || selectedInvitees.length === 0}>
+                {isSendingInvites ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4 mr-2" />
+                    Send Invites ({selectedInvitees.length})
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Track Modal */}
       <Dialog open={showAddTrackModal} onOpenChange={setShowAddTrackModal}>

@@ -159,7 +159,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
     loadPersonalizedData();
   }, [currentUserId]);
 
-  const displayName = username || realDisplayName || "Music Lover";
+  const displayName = realDisplayName || username || "Music Lover";
   
   // Get user lists as array for display
   const userListsArray = Object.values(userListsMetadata);
@@ -416,6 +416,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
                           previewUrl: review.previewUrl,
                           rating: review.rating,
                           year: review.date?.slice(0, 4),
+                          type: review.type,
                         });
                       }}
                     >
@@ -661,6 +662,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
                         previewUrl: review.previewUrl,
                         rating: review.rating,
                         year: review.date?.slice(0, 4),
+                        type: review.type,
                       });
                     }}
                   >
@@ -1048,6 +1050,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
                               previewUrl: review.previewUrl,
                               rating: review.rating,
                               year: review.date?.slice(0, 4),
+                              type: review.type,
                             })}
                           >
                             <img

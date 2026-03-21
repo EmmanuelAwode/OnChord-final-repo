@@ -3,6 +3,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
+import { formatDateForDisplay } from './localeFormatting';
 
 export interface Comment {
   id: string;
@@ -26,11 +27,13 @@ interface CommentRow {
   parent_comment_id: string | null;
   created_at: string;
   updated_at: string;
-  profiles?: {
-    username: string;
-    avatar_url: string;
-    display_name: string;
-  };
+}
+
+interface ProfileRow {
+  id: string;
+  username: string | null;
+  avatar_url: string | null;
+  display_name: string | null;
 }
 
 export function useReviewComments(reviewId?: string) {
@@ -48,16 +51,16 @@ export function useReviewComments(reviewId?: string) {
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
     if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
     if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
-    return date.toLocaleDateString();
+    return formatDateForDisplay(date, 'short');
   };
 
   // Transform database row to Comment
-  const transformComment = (row: CommentRow): Comment => ({
+  const transformComment = (row: CommentRow, profile?: ProfileRow): Comment => ({
     id: row.id,
     reviewId: row.review_id,
     userId: row.user_id,
-    userName: row.profiles?.display_name || row.profiles?.username || 'Unknown User',
-    userAvatar: row.profiles?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.user_id}`,
+    userName: profile?.display_name || profile?.username || 'Unknown User',
+    userAvatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.user_id}`,
     content: row.content,
     timestamp: formatTimestamp(row.created_at),
     likes: 0, // TODO: Add likes table for comments
@@ -71,19 +74,35 @@ export function useReviewComments(reviewId?: string) {
 
     setIsLoading(true);
     try {
+      // Query comments first to avoid requiring a FK relationship in PostgREST schema cache.
       const { data, error: fetchError } = await supabase
         .from('review_comments')
-        .select(`
-          *,
-          profiles:user_id (username, avatar_url, display_name)
-        `)
+        .select('*')
         .eq('review_id', reviewId)
         .order('created_at', { ascending: true });
 
       if (fetchError) throw fetchError;
 
+      const commentRows = (data || []) as CommentRow[];
+      const userIds = Array.from(new Set(commentRows.map((row) => row.user_id)));
+
+      let profileMap = new Map<string, ProfileRow>();
+      if (userIds.length > 0) {
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url, display_name')
+          .in('id', userIds);
+
+        if (profileError) {
+          // Continue rendering comments even if profile lookup fails.
+          console.warn('Failed to load profiles for comments:', profileError);
+        } else {
+          profileMap = new Map((profileData as ProfileRow[]).map((p) => [p.id, p]));
+        }
+      }
+
       // Transform and organize comments with replies
-      const allComments = (data || []).map(transformComment);
+      const allComments = commentRows.map((row) => transformComment(row, profileMap.get(row.user_id)));
       
       // Separate top-level comments and replies
       const topLevel = allComments.filter(c => !c.parentCommentId);

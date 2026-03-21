@@ -52,6 +52,7 @@ import { useReminders, type Reminder } from "../lib/useReminders";
 import { reviewComments } from "../lib/useReviewComments";
 import { getRecentlyPlayed, isSpotifyConnected } from "../lib/api/spotify";
 import { handleImageError } from "./ui/utils";
+import { formatDateForDisplay } from "../lib/localeFormatting";
 
 interface ReviewsPageProps {
   onNavigate?: (page: string) => void;
@@ -98,8 +99,9 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
         }
         const data = await getRecentlyPlayed(10);
         if (data?.items) {
-          const tracks = data.items.map((item: any) => ({
-            id: item.track?.id || Math.random().toString(),
+          const tracks = data.items.map((item: any, idx: number) => ({
+            id: item.track?.id || `track-${idx}`,
+            playEventId: `${item.track?.id || "track"}-${item.played_at || idx}-${idx}`,
             trackTitle: item.track?.name || "Unknown Track",
             trackArtist: item.track?.artists?.map((a: any) => a.name).join(", ") || "Unknown Artist",
             albumCover: item.track?.album?.images?.[0]?.url || "",
@@ -181,10 +183,21 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
     setReviewDetailModalOpen(true);
   };
 
-  const handleShare = (review: any) => {
-    toast.success("Link copied to clipboard!", {
-      description: `Share your review of ${review.albumTitle}`
-    });
+  const handleShare = async (review: any) => {
+    const text = `${review.albumTitle} by ${review.albumArtist} — reviewed by ${review.username || 'me'} on OnChord`;
+    const url = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: text, url });
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} | ${url}`);
+      toast.success("Copied to clipboard!", { description: text });
+    } catch {
+      toast.error("Could not copy link");
+    }
   };
 
   const handleDeleteClick = (e: React.MouseEvent, review: any) => {
@@ -253,7 +266,7 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
   };
 
   const weekDays = getWeekDays();
-  const weekRangeText = `${weekDays[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekDays[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  const weekRangeText = `${formatDateForDisplay(weekDays[0], 'monthDay')} - ${formatDateForDisplay(weekDays[6], 'full')}`;
 
   const previousMonth = () => {
     setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1));
@@ -265,7 +278,7 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
     setSelectedDate(null);
   };
 
-  const monthName = selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const monthName = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(selectedMonth);
   
   // Filter reviews by selected date
   const displayedReviews = selectedDate 
@@ -631,7 +644,7 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
                   </div>
                   <div className="flex-1 min-w-0">
                     <h2 className="text-sm sm:text-base text-foreground truncate">
-                      {modalDay && selectedMonth.toLocaleDateString('en-US', { month: 'long' })} {modalDay}, {selectedMonth.getFullYear()}
+                      {modalDay && new Intl.DateTimeFormat(undefined, { month: 'long' }).format(selectedMonth)} {modalDay}, {selectedMonth.getFullYear()}
                     </h2>
                     <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
                       {modalReviews.length} review{modalReviews.length !== 1 ? 's' : ''}
@@ -640,7 +653,7 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
                   </div>
                 </DialogTitle>
                 <DialogDescription className="sr-only">
-                  View all music reviews and reminders from {modalDay && selectedMonth.toLocaleDateString('en-US', { month: 'long' })} {modalDay}, {selectedMonth.getFullYear()}
+                  View all music reviews and reminders from {modalDay && new Intl.DateTimeFormat(undefined, { month: 'long' }).format(selectedMonth)} {modalDay}, {selectedMonth.getFullYear()}
                 </DialogDescription>
               </DialogHeader>
               
@@ -809,6 +822,7 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
                                         previewUrl: review.previewUrl,
                                         rating: review.rating,
                                         year: review.date?.slice(0, 4),
+                                        type: review.type,
                                       });
                                     }}
                                   >
@@ -959,7 +973,7 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
                 <Clock className="w-5 h-5 text-primary" />
                 <h3 className="text-xl text-foreground">
                   {selectedDate 
-                    ? `Reviews from ${selectedMonth.toLocaleDateString('en-US', { month: 'short' })} ${selectedDate}` 
+                    ? `Reviews from ${new Intl.DateTimeFormat(undefined, { month: 'short' }).format(selectedMonth)} ${selectedDate}` 
                     : 'Recent Reviews'
                   }
                 </h3>
@@ -1274,7 +1288,7 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
             <div className="grid gap-4">
               {recentlyListened.map((activity, index) => (
                 <Card 
-                  key={activity.id}
+                  key={activity.playEventId || `${activity.id}-${index}`}
                   className="p-5 bg-card border-border hover:border-primary/50 transition-all shadow-soft hover:shadow-medium cursor-pointer group"
                   style={{ animationDelay: `${index * 0.05}s` }}
                 >

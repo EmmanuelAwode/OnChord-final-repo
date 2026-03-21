@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "./ui/card";
 import { handleImageError } from "./ui/utils";
 import { Badge } from "./ui/badge";
 import { Avatar } from "./ui/avatar";
 import { Star, Heart, MessageCircle, ChevronDown, ChevronUp, Music } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { useSupabaseLikes } from "../lib/useSupabaseLikes";
+import { CommentsModal } from "./CommentsModal";
+import { supabase } from "../lib/supabaseClient";
 
 interface ExpandableReviewCardProps {
   review: {
@@ -16,6 +19,10 @@ interface ExpandableReviewCardProps {
     content: string;
     likes: number;
     comments: number;
+    albumTitle?: string;
+    albumArtist?: string;
+    albumCover?: string;
+    tags?: string[];
     mood?: string;
     listeningContext?: string;
     favoriteTrack?: string;
@@ -24,9 +31,38 @@ interface ExpandableReviewCardProps {
 
 export function ExpandableReviewCard({ review }: ExpandableReviewCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentCount, setCommentCount] = useState(review.comments);
+
+  const { toggleReviewLike, isReviewLiked, getReviewLikes, loadLikeCount } = useSupabaseLikes();
+
+  useEffect(() => {
+    loadLikeCount(review.id);
+    supabase
+      .from("review_comments")
+      .select("*", { count: "exact", head: true })
+      .eq("review_id", review.id)
+      .then(({ count }) => {
+        if (count !== null) setCommentCount(count);
+      });
+  }, [review.id]);
+
+  const refreshCommentCount = () => {
+    supabase
+      .from("review_comments")
+      .select("*", { count: "exact", head: true })
+      .eq("review_id", review.id)
+      .then(({ count }) => {
+        if (count !== null) setCommentCount(count);
+      });
+  };
+
+  const liked = isReviewLiked(review.id);
+  const likeCount = getReviewLikes(review.id) || review.likes;
 
   return (
-    <Card className="p-4 md:p-6 bg-card border-border hover:border-primary/30 transition-all">
+    <>
+      <Card className="p-4 md:p-6 bg-card border-border hover:border-primary/30 transition-all">
       <div className="flex gap-3 md:gap-4">
         <Avatar className="w-10 h-10 md:w-12 md:h-12 flex-shrink-0">
           <img src={review.userAvatar} alt={review.userName} className="object-cover" onError={handleImageError} />
@@ -128,13 +164,21 @@ export function ExpandableReviewCard({ review }: ExpandableReviewCardProps) {
 
           {/* Actions */}
           <div className="flex items-center gap-4 text-sm">
-            <button className="flex items-center gap-1 text-muted-foreground hover:text-primary transition">
-              <Heart className="w-4 h-4" />
-              {review.likes}
+            <button
+              onClick={() => toggleReviewLike(review.id)}
+              className={`flex items-center gap-1 transition ${
+                liked ? "text-secondary" : "text-muted-foreground hover:text-secondary"
+              }`}
+            >
+              <Heart className={`w-4 h-4 ${liked ? "fill-secondary" : ""}`} />
+              {likeCount}
             </button>
-            <button className="flex items-center gap-1 text-muted-foreground hover:text-primary transition">
+            <button
+              onClick={() => setCommentsOpen(true)}
+              className="flex items-center gap-1 text-muted-foreground hover:text-primary transition"
+            >
               <MessageCircle className="w-4 h-4" />
-              {review.comments}
+              {commentCount}
             </button>
             
             {/* Expand/Collapse Button */}
@@ -152,6 +196,28 @@ export function ExpandableReviewCard({ review }: ExpandableReviewCardProps) {
           </div>
         </div>
       </div>
-    </Card>
+      </Card>
+
+      <CommentsModal
+        isOpen={commentsOpen}
+        onClose={() => {
+          setCommentsOpen(false);
+          refreshCommentCount();
+        }}
+        review={{
+          id: review.id,
+          albumTitle: review.albumTitle ?? "",
+          albumArtist: review.albumArtist ?? "",
+          albumCover: review.albumCover ?? "",
+          userName: review.userName,
+          userAvatar: review.userAvatar,
+          rating: review.rating,
+          content: review.content,
+          timestamp: review.timestamp,
+          tags: review.tags,
+          comments: commentCount,
+        }}
+      />
+    </>
   );
 }

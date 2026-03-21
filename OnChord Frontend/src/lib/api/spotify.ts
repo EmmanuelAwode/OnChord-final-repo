@@ -18,6 +18,7 @@ const SPOTIFY_SCOPES = [
 // In-memory token cache to avoid DB lookups on every API call
 let cachedAccessToken: string | null = null;
 let cachedTokenExpiry: number = 0;
+let refreshBlockedUntil = 0;
 
 // ============================================
 // PKCE Helpers
@@ -43,6 +44,67 @@ function base64encode(input: ArrayBuffer): string {
 }
 
 const CODE_VERIFIER_KEY = "spotify_pkce_code_verifier";
+const FLOW_MARKER_KEY = "spotify_pkce_flow";
+const MANUAL_DISCONNECT_KEY = "onchord_spotify_manual_disconnect";
+const AUDIO_FEATURES_RESTRICTED_KEY = "onchord_spotify_audio_features_restricted";
+
+let isAudioFeaturesRestricted = false;
+let hasLoggedAudioFeaturesRestriction = false;
+
+const getAudioFeaturesRestrictionFlag = (): boolean => {
+  if (isAudioFeaturesRestricted) return true;
+
+  try {
+    return sessionStorage.getItem(AUDIO_FEATURES_RESTRICTED_KEY) === "true";
+  } catch {
+    return false;
+  }
+};
+
+const setAudioFeaturesRestrictionFlag = (value: boolean) => {
+  isAudioFeaturesRestricted = value;
+
+  try {
+    if (value) {
+      sessionStorage.setItem(AUDIO_FEATURES_RESTRICTED_KEY, "true");
+    } else {
+      sessionStorage.removeItem(AUDIO_FEATURES_RESTRICTED_KEY);
+    }
+  } catch {
+    // Ignore storage errors in restricted environments.
+  }
+};
+
+const isAudioFeaturesEndpoint = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === "api.spotify.com" && parsed.pathname.startsWith("/v1/audio-features");
+  } catch {
+    return url.includes("/v1/audio-features");
+  }
+};
+
+const getManualDisconnectFlag = (): boolean => {
+  try {
+    return localStorage.getItem(MANUAL_DISCONNECT_KEY) === "true";
+  } catch {
+    return false;
+  }
+};
+
+const setManualDisconnectFlag = (value: boolean) => {
+  try {
+    if (value) {
+      localStorage.setItem(MANUAL_DISCONNECT_KEY, "true");
+    } else {
+      localStorage.removeItem(MANUAL_DISCONNECT_KEY);
+    }
+  } catch {
+    // Ignore storage errors in restricted environments.
+  }
+};
+
+export const isSpotifyAutolinkDisabled = () => getManualDisconnectFlag();
 
 // ============================================
 // OAuth Flow (PKCE — no client secret needed)
@@ -53,12 +115,16 @@ const CODE_VERIFIER_KEY = "spotify_pkce_code_verifier";
  * Generates a code verifier/challenge and redirects to Spotify authorization.
  */
 export async function initiateSpotifyLogin() {
+  // User explicitly reconnecting Spotify API.
+  setManualDisconnectFlag(false);
+
   const codeVerifier = generateRandomString(64);
   const hashed = await sha256(codeVerifier);
   const codeChallenge = base64encode(hashed);
 
   // Store code verifier for the callback
   sessionStorage.setItem(CODE_VERIFIER_KEY, codeVerifier);
+  sessionStorage.setItem(FLOW_MARKER_KEY, "api_connect");
 
   const authUrl = new URL("https://accounts.spotify.com/authorize");
   authUrl.searchParams.append("client_id", SPOTIFY_CLIENT_ID);
@@ -80,6 +146,7 @@ export async function initiateSpotifyLogin() {
 export async function handleSpotifyCallback(code: string) {
   const codeVerifier = sessionStorage.getItem(CODE_VERIFIER_KEY);
   if (!codeVerifier) {
+    sessionStorage.removeItem(FLOW_MARKER_KEY);
     throw new Error("No PKCE code verifier found. Please try connecting again.");
   }
 
@@ -107,6 +174,8 @@ export async function handleSpotifyCallback(code: string) {
 
   // Clean up PKCE verifier
   sessionStorage.removeItem(CODE_VERIFIER_KEY);
+  sessionStorage.removeItem(FLOW_MARKER_KEY);
+  setManualDisconnectFlag(false);
 
   // Get Spotify user profile
   const profileResponse = await fetch("https://api.spotify.com/v1/me", {
@@ -164,6 +233,13 @@ export async function handleSpotifyCallback(code: string) {
  * PKCE refresh doesn't require a client_secret — just client_id + refresh_token.
  */
 async function refreshAccessToken(refreshToken: string): Promise<string> {
+  if (!refreshToken) {
+    cachedAccessToken = null;
+    cachedTokenExpiry = 0;
+    refreshBlockedUntil = Date.now() + 5 * 60 * 1000;
+    throw new Error("Spotify refresh token missing. Please reconnect your Spotify account.");
+  }
+
   const response = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
@@ -180,6 +256,7 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
     // Token refresh failed — user needs to re-authorize
     cachedAccessToken = null;
     cachedTokenExpiry = 0;
+    refreshBlockedUntil = Date.now() + 5 * 60 * 1000;
     throw new Error("Spotify session expired. Please reconnect your Spotify account.");
   }
 
@@ -213,6 +290,14 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
  * Call this before any Spotify API request.
  */
 export async function getSpotifyAccessToken(): Promise<string> {
+  if (getManualDisconnectFlag()) {
+    throw new Error("Spotify is disconnected. Reconnect in Settings to continue.");
+  }
+
+  if (refreshBlockedUntil > Date.now()) {
+    throw new Error("Spotify session expired. Please reconnect your Spotify account.");
+  }
+
   // Check in-memory cache (with 5 min buffer before expiry)
   if (cachedAccessToken && cachedTokenExpiry > Date.now() + 5 * 60 * 1000) {
     return cachedAccessToken;
@@ -243,7 +328,7 @@ export async function getSpotifyAccessToken(): Promise<string> {
   }
 
   // Token expired — refresh it
-  return refreshAccessToken(connection.refresh_token);
+  return refreshAccessToken(connection.refresh_token ?? "");
 }
 
 /**
@@ -266,6 +351,10 @@ export async function isSpotifyConnected(): Promise<boolean> {
  * Gets the current user's Spotify connection status
  */
 export async function getSpotifyConnection() {
+  if (getManualDisconnectFlag()) {
+    return null;
+  }
+
   const { data: sessionData } = await supabase.auth.getSession();
 
   if (!sessionData.session) {
@@ -310,6 +399,8 @@ export async function disconnectSpotify() {
   // Clear cache
   cachedAccessToken = null;
   cachedTokenExpiry = 0;
+  refreshBlockedUntil = 0;
+  setManualDisconnectFlag(true);
 }
 
 // ============================================
@@ -332,8 +423,16 @@ async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Res
 
   // Handle 403 errors
   if (response.status === 403) {
-    const errorBody = await response.clone().json().catch(() => ({}));
-    console.error("Spotify 403 Error:", errorBody);
+    if (isAudioFeaturesEndpoint(url)) {
+      setAudioFeaturesRestrictionFlag(true);
+      if (!hasLoggedAudioFeaturesRestriction) {
+        console.info("Spotify audio-features endpoint is restricted for this app; using fallbacks.");
+        hasLoggedAudioFeaturesRestriction = true;
+      }
+    } else {
+      const errorBody = await response.clone().json().catch(() => ({}));
+      console.error("Spotify 403 Error:", errorBody);
+    }
   }
 
   // If 401, token might have been revoked — clear cache and try once more
@@ -483,13 +582,19 @@ export async function getTrack(trackId: string) {
  * Returns null if unavailable rather than throwing.
  */
 export async function getTrackAudioFeatures(trackId: string) {
+  if (getAudioFeaturesRestrictionFlag()) {
+    return null;
+  }
+
   try {
     const response = await spotifyFetch(
       `https://api.spotify.com/v1/audio-features/${trackId}`
     );
 
     if (!response.ok) {
-      console.warn("Audio features unavailable (may be restricted for this app)");
+      if (response.status === 403) {
+        setAudioFeaturesRestrictionFlag(true);
+      }
       return null;
     }
 
@@ -505,6 +610,7 @@ export async function getTrackAudioFeatures(trackId: string) {
  */
 export async function getMultipleTrackAudioFeatures(trackIds: string[]) {
   if (trackIds.length === 0) return null;
+  if (getAudioFeaturesRestrictionFlag()) return null;
 
   try {
     const url = new URL("https://api.spotify.com/v1/audio-features");
@@ -513,7 +619,9 @@ export async function getMultipleTrackAudioFeatures(trackIds: string[]) {
     const response = await spotifyFetch(url.toString());
 
     if (!response.ok) {
-      console.warn("Audio features unavailable (may be restricted for this app)");
+      if (response.status === 403) {
+        setAudioFeaturesRestrictionFlag(true);
+      }
       return null;
     }
 

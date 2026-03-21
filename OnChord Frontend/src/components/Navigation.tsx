@@ -1,12 +1,14 @@
 import { Home, Users, User, Search, Menu, Music2, BarChart3, Sparkles, MessageCircle, Bell, Settings, ChevronUp, Star, Ticket, Info, Shield, FileText, HelpCircle, LogOut, BellDot } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { cn } from "./ui/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Logo } from "./Logo";
 import { useUnreadNotifications } from "./NotificationsModal";
 import { useReminders } from "../lib/useReminders";
 import NotificationsPanel from "./NotificationsPanel";
+import { isSpotifyConnected } from "../lib/api/spotify";
+import { supabase } from "../lib/supabaseClient";
 
 interface NavigationProps {
   currentPage: string;
@@ -25,15 +27,167 @@ const navItems = [
   { id: "discover", label: "Discover", icon: Sparkles },
   { id: "insights", label: "Insights", icon: BarChart3 },
   { id: "reviews", label: "Reviews", icon: Star },
-  { id: "messages", label: "Messages", icon: MessageCircle, badge: 2 },
+  { id: "messages", label: "Messages", icon: MessageCircle },
   { id: "events", label: "Events", icon: Ticket },
   { id: "your-space", label: "Your Space", icon: User },
 ];
 
 export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username, email, onOpenNotifications, onOpenReminders, onLogout }: NavigationProps) {
   const [showConnectedAccounts, setShowConnectedAccounts] = useState(false);
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null);
+  const [profileUsername, setProfileUsername] = useState<string | null>(null);
   const unreadCount = useUnreadNotifications();
   const { reminderCount } = useReminders();
+
+  const loadSpotifyStatus = async () => {
+    try {
+      const connected = await isSpotifyConnected();
+      setSpotifyConnected(connected);
+    } catch {
+      setSpotifyConnected(false);
+    }
+  };
+
+  const loadProfileIdentity = async (userId: string) => {
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("display_name, username")
+        .eq("id", userId)
+        .maybeSingle();
+
+      setProfileDisplayName(profile?.display_name ?? null);
+      setProfileUsername(profile?.username ?? null);
+    } catch (error) {
+      console.error("Failed to load navigation profile identity:", error);
+    }
+  };
+
+  const loadUnreadMessageCount = async (userId: string) => {
+    try {
+      const { data: conversations, error: convoError } = await supabase
+        .from("conversations")
+        .select("id")
+        .or(`participant_1.eq.${userId},participant_2.eq.${userId}`);
+
+      if (convoError) throw convoError;
+
+      const conversationIds = (conversations || []).map((c) => c.id);
+      if (conversationIds.length === 0) {
+        setUnreadMessageCount(0);
+        return;
+      }
+
+      const { count, error: countError } = await supabase
+        .from("direct_messages")
+        .select("id", { count: "exact", head: true })
+        .in("conversation_id", conversationIds)
+        .neq("sender_id", userId)
+        .is("read_at", null);
+
+      if (countError) throw countError;
+      setUnreadMessageCount(count || 0);
+    } catch (error) {
+      console.error("Failed to load unread message count:", error);
+      setUnreadMessageCount(0);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      const uid = data.session?.user?.id || null;
+      setCurrentUserId(uid);
+      if (uid) {
+        loadUnreadMessageCount(uid);
+        loadProfileIdentity(uid);
+        loadSpotifyStatus();
+      } else {
+        setUnreadMessageCount(0);
+        setProfileDisplayName(null);
+        setProfileUsername(null);
+        setSpotifyConnected(false);
+      }
+    });
+
+    const { data: authSub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!active) return;
+
+      const uid = session?.user?.id || null;
+      setCurrentUserId(uid);
+
+      if (uid) {
+        await Promise.all([
+          loadUnreadMessageCount(uid),
+          loadProfileIdentity(uid),
+          loadSpotifyStatus(),
+        ]);
+      } else {
+        setUnreadMessageCount(0);
+        setProfileDisplayName(null);
+        setProfileUsername(null);
+        setSpotifyConnected(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      authSub.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    loadProfileIdentity(currentUserId);
+    loadSpotifyStatus();
+
+    const refresh = () => loadUnreadMessageCount(currentUserId);
+    const refreshProfile = () => loadProfileIdentity(currentUserId);
+    const refreshSpotify = () => loadSpotifyStatus();
+
+    const channel = supabase
+      .channel(`nav_realtime_${currentUserId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "direct_messages" },
+        refresh
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversations" },
+        refresh
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles", filter: `id=eq.${currentUserId}` },
+        refreshProfile
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "spotify_connections", filter: `user_id=eq.${currentUserId}` },
+        refreshSpotify
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId]);
+
+  const getItemBadge = (itemId: string): number => {
+    if (itemId === "messages") return unreadMessageCount;
+    return 0;
+  };
+
+  const navDisplayName = (profileDisplayName || username || "User").trim();
+  const navUsername = (profileUsername || username || "user").trim();
+  const navHandle = navUsername.startsWith("@") ? navUsername.slice(1) : navUsername;
 
   return (
     <>
@@ -62,6 +216,7 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentPage === item.id;
+              const itemBadge = getItemBadge(item.id);
               return (
                 <button
                   key={item.id}
@@ -75,9 +230,9 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
                 >
                   <Icon className={cn("w-5 h-5", isActive && "drop-shadow-lg")} />
                   <span className="text-xs whitespace-nowrap">{item.label}</span>
-                  {item.badge && item.badge > 0 && (
+                  {itemBadge > 0 && (
                     <div className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-secondary to-secondary/80 rounded-full flex items-center justify-center shadow-glow-secondary">
-                      <span className="text-[10px] text-white font-semibold">{item.badge}</span>
+                      <span className="text-[10px] text-white font-semibold">{itemBadge > 99 ? "99+" : itemBadge}</span>
                     </div>
                   )}
                 </button>
@@ -151,6 +306,7 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
           {navItems.map((item, index) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
+            const itemBadge = getItemBadge(item.id);
             return (
               <motion.button
                 key={item.id}
@@ -167,9 +323,9 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
               >
                 <Icon className="w-5 h-5" />
                 <span>{item.label}</span>
-                {item.badge && item.badge > 0 && (
+                {itemBadge > 0 && (
                   <Badge className="ml-auto bg-secondary text-secondary-foreground border-0 h-5 px-2">
-                    {item.badge}
+                    {itemBadge > 99 ? "99+" : itemBadge}
                   </Badge>
                 )}
               </motion.button>
@@ -253,12 +409,12 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
             >
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center flex-shrink-0 shadow-glow-primary">
                 <span className="text-white font-semibold">
-                  {username.charAt(0).toUpperCase()}
+                  {navDisplayName.charAt(0).toUpperCase()}
                 </span>
               </div>
               <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm text-foreground truncate">{username}</p>
-                <p className="text-xs text-muted-foreground truncate">@{username.toLowerCase().replace(/\s+/g, '')}</p>
+                <p className="text-sm text-foreground truncate">{navDisplayName}</p>
+                <p className="text-xs text-muted-foreground truncate">@{navHandle}</p>
               </div>
               <ChevronUp 
                 className={cn(
@@ -271,22 +427,17 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
             {showConnectedAccounts && (
               <div className="px-3 pb-3 pt-2 space-y-2 border-t border-border animate-fade-in">
                 <p className="text-xs text-muted-foreground mb-2">Connected Accounts</p>
-                <div className="flex items-center gap-2 p-2 bg-card rounded-lg">
-                  <div className="bg-secondary/20 p-1.5 rounded flex-shrink-0">
-                    <Music2 className="w-3 h-3 text-secondary" />
+                {spotifyConnected ? (
+                  <div className="flex items-center gap-2 p-2 bg-card rounded-lg">
+                    <div className="bg-secondary/20 p-1.5 rounded flex-shrink-0">
+                      <Music2 className="w-3 h-3 text-secondary" />
+                    </div>
+                    <span className="text-xs text-foreground flex-1 truncate">Spotify</span>
+                    <Badge className="bg-secondary/20 text-secondary border-0 text-[10px] flex-shrink-0">Active</Badge>
                   </div>
-                  <span className="text-xs text-foreground flex-1 truncate">Spotify</span>
-                  <Badge className="bg-secondary/20 text-secondary border-0 text-[10px] flex-shrink-0">Active</Badge>
-                </div>
-                <div className="flex items-center gap-2 p-2 bg-card rounded-lg">
-                  <div className="bg-chart-4/20 p-1.5 rounded flex-shrink-0">
-                    <svg className="w-3 h-3 text-chart-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                    </svg>
-                  </div>
-                  <span className="text-xs text-foreground flex-1 truncate">Instagram</span>
-                  <Badge className="bg-chart-4/20 text-chart-4 border-0 text-[10px] flex-shrink-0">Active</Badge>
-                </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground px-2 py-1">No connected accounts</p>
+                )}
               </div>
             )}
           </div>

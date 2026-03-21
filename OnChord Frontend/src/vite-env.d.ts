@@ -7,6 +7,9 @@ interface ImportMetaEnv {
   readonly VITE_SPOTIFY_CLIENT_ID: string;
   readonly VITE_SPOTIFY_REDIRECT_URI: string;
   readonly VITE_TICKETMASTER_API_KEY?: string;
+  readonly VITE_SENTRY_DSN?: string;
+  readonly VITE_APP_ENV?: string;
+  readonly VITE_SENTRY_TRACES_SAMPLE_RATE?: string;
 }
 
 interface ImportMeta {
