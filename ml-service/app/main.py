@@ -68,7 +68,7 @@ app = FastAPI(title="OnChord ML Service")
 # Get allowed origins from environment or use defaults
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:3000,http://localhost:3001,http://127.0.0.1:5173,http://127.0.0.1:3000,http://127.0.0.1:3001"
+    "http://localhost:5173,http://localhost:3000,http://localhost:3001,http://127.0.0.1:5173,http://127.0.0.1:3000,http://127.0.0.1:3001,https://onchord-frontend.onrender.com"
 ).split(",")
 
 app.add_middleware(
