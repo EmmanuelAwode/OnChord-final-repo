@@ -13,9 +13,21 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import os
 
-# Deployment mode - skip heavy CSV loading on memory-constrained environments
-LIGHT_MODE = os.environ.get("RENDER", "") == "true" or os.environ.get("LIGHT_MODE", "").lower() == "true"
-if LIGHT_MODE:
+# Deployment mode - skip heavy CSV loading on memory-constrained environments.
+# Render sets RENDER=true automatically, so provide an explicit override when
+# full ML mode is required in production.
+FORCE_FULL_MODE = (
+    os.environ.get("FORCE_FULL_MODE", "").lower() == "true"
+    or os.environ.get("FULL_MODE", "").lower() == "true"
+)
+LIGHT_MODE = (not FORCE_FULL_MODE) and (
+    os.environ.get("RENDER", "").lower() == "true"
+    or os.environ.get("LIGHT_MODE", "").lower() == "true"
+)
+
+if FORCE_FULL_MODE:
+    logger.info("[ML] FORCE_FULL_MODE enabled - loading full ML stack")
+elif LIGHT_MODE:
     logger.info("[ML] Running in LIGHT MODE - skipping CSV loading to save memory")
 
 # Load environment variables from .env file
@@ -1038,6 +1050,7 @@ def health_check():
     return {
         "status": "healthy",
         "light_mode": LIGHT_MODE,
+        "force_full_mode": FORCE_FULL_MODE,
         "taste_model_loaded": taste_model is not None,
         "ml_taste_model_loaded": ml_taste_model is not None,
         "mood_classifier_loaded": mood_classifier is not None,
