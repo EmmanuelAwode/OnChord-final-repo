@@ -847,6 +847,21 @@ def classify_playlist_mood_by_ids(payload: MoodClassifyByIdsRequest):
     """
     if not payload.track_ids:
         raise HTTPException(status_code=400, detail="No track IDs provided")
+
+    # In LIGHT_MODE the full classifier may be disabled; return a safe fallback
+    # instead of raising an internal server error.
+    if mood_classifier is None:
+        return MoodClassifyResponse(
+            moods=[MoodItem(mood="Energetic", percentage=30, color="#FF6B6B"),
+                   MoodItem(mood="Happy", percentage=30, color="#FFD93D"),
+                   MoodItem(mood="Chill", percentage=40, color="#6BCB77")],
+            dominant_mood="Chill",
+            dominant_color="#6BCB77",
+            track_count=len(payload.track_ids),
+            tracks_analyzed=0,
+            insights={"note": "Mood classifier unavailable in current deployment mode, showing fallback values"},
+            average_features={"energy": 0.5, "danceability": 0.5, "valence": 0.5, "acousticness": 0.5, "instrumentalness": 0.1}
+        )
     
     result = mood_classifier.classify_by_track_ids(payload.track_ids)
     
