@@ -52,6 +52,44 @@
     build: {
       target: 'esnext',
       outDir: 'dist',
+      chunkSizeWarningLimit: 600,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Vendor chunks
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-radix': [
+              '@radix-ui/react-dialog',
+              '@radix-ui/react-popover',
+              '@radix-ui/react-select',
+              '@radix-ui/react-tabs',
+              '@radix-ui/react-dropdown-menu',
+            ],
+            'vendor-supabase': ['@supabase/supabase-js'],
+            'vendor-ui': ['sonner', 'motion'],
+            // Feature chunks
+            'charts': ['recharts'],
+            'carousel': ['embla-carousel-react'],
+            // Utilities
+            'utils-forms': ['react-hook-form', 'zod'],
+            'utils-date': ['react-day-picker'],
+          },
+          entryFileNames: 'js/[name]-[hash].js',
+          chunkFileNames: 'js/chunk-[name]-[hash].js',
+          assetFileNames: (assetInfo) => {
+            const info = assetInfo.name.split('.');
+            const ext = info[info.length - 1];
+            if (/png|jpe?g|gif|svg/.test(ext)) {
+              return `assets/images/[name]-[hash][extname]`;
+            } else if (/woff|woff2|eot|ttf|otf/.test(ext)) {
+              return `assets/fonts/[name]-[hash][extname]`;
+            } else if (ext === 'css') {
+              return `css/[name]-[hash][extname]`;
+            }
+            return `assets/[name]-[hash][extname]`;
+          },
+        },
+      },
     },
     server: {
       host: '127.0.0.1',

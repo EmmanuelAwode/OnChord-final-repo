@@ -1,46 +1,57 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { AuthPage } from "./components/AuthPage";
-import { ResetPasswordPage } from "./components/ResetPasswordPage";
-import { HomePage } from "./components/HomePage";
-import { DiscoverPage } from "./components/DiscoverPage";
-import { InsightsPage } from "./components/InsightsPage";
-import { ProfilePage } from "./components/ProfilePage";
-import { ReviewsPage } from "./components/ReviewsPage";
-import { MessagingPage } from "./components/MessagingPage";
-import { CollaborativePlaylistPage } from "./components/CollaborativePlaylistPage";
-import { CollaborativePlaylistsHub } from "./components/CollaborativePlaylistsHub";
-import { CreateReviewPage } from "./components/CreateReviewPage";
-import { SettingsPage } from "./components/SettingsPage";
-import { EditProfilePage } from "./components/EditProfilePage";
-import { NotificationsModal } from "./components/NotificationsModal";
-import { RemindersModal } from "./components/RemindersModal";
-import { CollectionDetailPage } from "./components/CollectionDetailPage";
-import { EventsPage } from "./components/EventsPage";
-import { AboutPage } from "./components/AboutPage";
-import { PrivacyPage } from "./components/PrivacyPage";
-import { TermsPage } from "./components/TermsPage";
-import { HelpPage } from "./components/HelpPage";
-import { YourSpacePage } from "./components/YourSpacePage";
-import { ListsPage } from "./components/ListsPage";
 import { LoadingScreen } from "./components/LoadingScreen";
-import { OnboardingFlow } from "./components/OnboardingFlow";
 import { Navigation } from "./components/Navigation";
 import { PreviewProvider } from "./components/SongPreviewPlayer";
 import { ListsProvider } from "./lib/ListsContext";
 import { QuickActionButton } from "./components/QuickActionButton";
 import { Footer } from "./components/Footer";
+import { NotificationsModal } from "./components/NotificationsModal";
+import { RemindersModal } from "./components/RemindersModal";
 import { AlbumModal } from "./components/AlbumModal";
 import { ReviewCreationModal } from "./components/ReviewCreationModal";
-import { FindFriendsPage } from "./components/FindFriendsPage";
-import { FriendsReviewsPage } from "./components/FriendsReviewsPage";
-import { UserProfilePage } from "./components/UserProfilePage";
 import { useReviews } from "./lib/useUserInteractions";
 import { useNavigationHistory } from "./lib/useNavigationHistory";
 import { supabase } from "./lib/supabaseClient";
 import { getAlbum, isSpotifyAutolinkDisabled } from "./lib/api/spotify";
 import { Toaster } from "./components/ui/sonner";
+
+// Lazy-loaded page components for code-splitting
+const ResetPasswordPage = lazy(() => import("./components/ResetPasswordPage").then(m => ({ default: m.ResetPasswordPage })));
+const HomePage = lazy(() => import("./components/HomePage").then(m => ({ default: m.HomePage })));
+const DiscoverPage = lazy(() => import("./components/DiscoverPage").then(m => ({ default: m.DiscoverPage })));
+const InsightsPage = lazy(() => import("./components/InsightsPage").then(m => ({ default: m.InsightsPage })));
+const ProfilePage = lazy(() => import("./components/ProfilePage").then(m => ({ default: m.ProfilePage })));
+const ReviewsPage = lazy(() => import("./components/ReviewsPage").then(m => ({ default: m.ReviewsPage })));
+const MessagingPage = lazy(() => import("./components/MessagingPage").then(m => ({ default: m.MessagingPage })));
+const CollaborativePlaylistPage = lazy(() => import("./components/CollaborativePlaylistPage").then(m => ({ default: m.CollaborativePlaylistPage })));
+const CollaborativePlaylistsHub = lazy(() => import("./components/CollaborativePlaylistsHub").then(m => ({ default: m.CollaborativePlaylistsHub })));
+const CreateReviewPage = lazy(() => import("./components/CreateReviewPage").then(m => ({ default: m.CreateReviewPage })));
+const SettingsPage = lazy(() => import("./components/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const EditProfilePage = lazy(() => import("./components/EditProfilePage").then(m => ({ default: m.EditProfilePage })));
+const CollectionDetailPage = lazy(() => import("./components/CollectionDetailPage").then(m => ({ default: m.CollectionDetailPage })));
+const EventsPage = lazy(() => import("./components/EventsPage").then(m => ({ default: m.EventsPage })));
+const AboutPage = lazy(() => import("./components/AboutPage").then(m => ({ default: m.AboutPage })));
+const PrivacyPage = lazy(() => import("./components/PrivacyPage").then(m => ({ default: m.PrivacyPage })));
+const TermsPage = lazy(() => import("./components/TermsPage").then(m => ({ default: m.TermsPage })));
+const HelpPage = lazy(() => import("./components/HelpPage").then(m => ({ default: m.HelpPage })));
+const YourSpacePage = lazy(() => import("./components/YourSpacePage").then(m => ({ default: m.YourSpacePage })));
+const ListsPage = lazy(() => import("./components/ListsPage").then(m => ({ default: m.ListsPage })));
+const OnboardingFlow = lazy(() => import("./components/OnboardingFlow").then(m => ({ default: m.OnboardingFlow })));
+const FindFriendsPage = lazy(() => import("./components/FindFriendsPage").then(m => ({ default: m.FindFriendsPage })));
+const FriendsReviewsPage = lazy(() => import("./components/FriendsReviewsPage").then(m => ({ default: m.FriendsReviewsPage })));
+const UserProfilePage = lazy(() => import("./components/UserProfilePage").then(m => ({ default: m.UserProfilePage })));
+
+// Loading fallback component
+const PageLoadingFallback = () => (
+  <div className="flex items-center justify-center min-h-screen bg-background">
+    <div className="animate-pulse flex flex-col items-center gap-3">
+      <div className="h-2 w-12 bg-primary/30 rounded" />
+    </div>
+  </div>
+);
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(false);
@@ -918,7 +929,9 @@ const handleSubmitReview = async (reviewData: {
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.3 }}
             >
-              {renderPage()}
+              <Suspense fallback={<PageLoadingFallback />}>
+                {renderPage()}
+              </Suspense>
             </motion.div>
           </AnimatePresence>
 
