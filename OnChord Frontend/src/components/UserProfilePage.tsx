@@ -3,11 +3,12 @@ import { handleImageError } from "./ui/utils";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Star, Heart, MessageCircle, UserPlus, UserMinus, Users, Music2 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { Star, Heart, MessageCircle, UserPlus, UserMinus, Users, Music2, MoreVertical, Ban } from "lucide-react";
 import { useState, useEffect } from "react";
 import { BackButton } from "./BackButton";
 import { useProfileById } from "../lib/useProfile";
-import { getFollowerCount, getFollowingCount, followUser, unfollowUser, isFollowing as checkIsFollowing, getFollowers, getFollowing } from "../lib/api/follows";
+import { getFollowerCount, getFollowingCount, followUser, unfollowUser, isFollowing as checkIsFollowing, getFollowers, getFollowing, blockUser, unblockUser, isBlocked } from "../lib/api/follows";
 import { getProfiles, type Profile } from "../lib/api/profiles";
 import { getUserReviews } from "../lib/api/reviews";
 import { supabase } from "../lib/supabaseClient";
@@ -30,6 +31,8 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
   const [followsYou, setFollowsYou] = useState(false);
   const [isOwnProfile, setIsOwnProfile] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [isUserBlocked, setIsUserBlocked] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("reviews");
   const [followerProfiles, setFollowerProfiles] = useState<Profile[]>([]);
   const [followingProfiles, setFollowingProfiles] = useState<Profile[]>([]);
@@ -58,7 +61,7 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
 
         // Check follow relationship
         if (myId && myId !== userId) {
-          const [iFollow, theyFollowMe] = await Promise.all([
+          const [iFollow, theyFollowMe, blocked] = await Promise.all([
             checkIsFollowing(userId),
             // Check if this user follows the current user
             (async () => {
@@ -70,9 +73,11 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
                 .maybeSingle();
               return !!data;
             })(),
+            isBlocked(userId),
           ]);
           setIsCurrentlyFollowing(iFollow);
           setFollowsYou(theyFollowMe);
+          setIsUserBlocked(blocked);
         }
 
         // Load follower/following profiles for this user
@@ -142,6 +147,26 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
       toast.error("Failed to update follow status");
     } finally {
       setFollowLoading(false);
+    }
+  }
+
+  async function handleToggleBlock() {
+    setBlockLoading(true);
+    try {
+      if (isUserBlocked) {
+        await unblockUser(userId);
+        setIsUserBlocked(false);
+        toast.success(`Unblocked ${profile?.display_name || "user"}`);
+      } else {
+        await blockUser(userId);
+        setIsUserBlocked(true);
+        toast.success(`Blocked ${profile?.display_name || "user"}`);
+      }
+    } catch (error) {
+      console.error("Error toggling block:", error);
+      toast.error("Failed to update block status");
+    } finally {
+      setBlockLoading(false);
     }
   }
 
@@ -227,6 +252,19 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
                       <MessageCircle className="w-3 h-3 mr-1" />
                       Message
                     </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="border-border px-2">
+                          <MoreVertical className="w-4 h-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={handleToggleBlock} disabled={blockLoading}>
+                          <Ban className="w-4 h-4 mr-2" />
+                          {isUserBlocked ? "Unblock" : "Block"}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 )}
               </div>
@@ -253,6 +291,19 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
                     <MessageCircle className="w-4 h-4 mr-1" />
                     Message
                   </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="border-border px-2">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={handleToggleBlock} disabled={blockLoading}>
+                        <Ban className="w-4 h-4 mr-2" />
+                        {isUserBlocked ? "Unblock" : "Block"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )}
             </div>

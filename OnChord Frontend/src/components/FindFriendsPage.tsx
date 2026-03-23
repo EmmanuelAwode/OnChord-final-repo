@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
-import { Search, UserPlus, UserMinus, Music2, Users, Sparkles, TrendingUp, Loader2, MessageCircle } from "lucide-react";
+import { Search, UserPlus, UserMinus, Music2, Users, Sparkles, TrendingUp, Loader2, MessageCircle, MoreVertical, Ban } from "lucide-react";
 import { PageHeader } from "./PageHeader";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { motion } from "motion/react";
 import { useProfileSearch } from "../lib/useProfile";
-import { followUser, unfollowUser, isFollowing, getFollowers } from "../lib/api/follows";
+import { followUser, unfollowUser, isFollowing, getFollowers, blockUser, unblockUser, isBlocked } from "../lib/api/follows";
 import { getProfiles, type Profile } from "../lib/api/profiles";
 import { supabase } from "../lib/supabaseClient";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ interface FindFriendsPageProps {
 export function FindFriendsPage({ onNavigate, onBack, canGoBack }: FindFriendsPageProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [followingState, setFollowingState] = useState<Record<string, boolean>>({});
+  const [blockedState, setBlockedState] = useState<Record<string, boolean>>({});
   const [suggestedUsers, setSuggestedUsers] = useState<Profile[]>([]);
   const [followBackUsers, setFollowBackUsers] = useState<Profile[]>([]);
   const [followerIdSet, setFollowerIdSet] = useState<Set<string>>(new Set());
@@ -162,8 +164,28 @@ export function FindFriendsPage({ onNavigate, onBack, canGoBack }: FindFriendsPa
     }
   }
 
+  async function handleToggleBlock(userId: string) {
+    try {
+      const isCurrentlyBlocked = blockedState[userId];
+      
+      if (isCurrentlyBlocked) {
+        await unblockUser(userId);
+        setBlockedState(prev => ({ ...prev, [userId]: false }));
+        toast.success("Unblocked user");
+      } else {
+        await blockUser(userId);
+        setBlockedState(prev => ({ ...prev, [userId]: true }));
+        toast.success("Blocked user");
+      }
+    } catch (error) {
+      console.error("Error toggling block:", error);
+      toast.error("Failed to update block status");
+    }
+  }
+
   const UserCard = ({ user }: { user: Profile }) => {
     const isFollowing = followingState[user.id];
+    const isBlocked = blockedState[user.id];
     const isSelf = user.id === currentUserId;
     const followsYou = followerIdSet.has(user.id);
 
@@ -249,6 +271,19 @@ export function FindFriendsPage({ onNavigate, onBack, canGoBack }: FindFriendsPa
                 <MessageCircle className="w-4 h-4 mr-1" />
                 Message
               </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="px-2">
+                    <MoreVertical className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleToggleBlock(user.id)}>
+                    <Ban className="w-4 h-4 mr-2" />
+                    {isBlocked ? "Unblock" : "Block"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </div>
