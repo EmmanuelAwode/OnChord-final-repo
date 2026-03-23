@@ -219,9 +219,15 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
                     Edit
                   </Button>
                 ) : (
-                  <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" className="flex-shrink-0 ml-2" disabled={followLoading}>
-                    {isCurrentlyFollowing ? <><UserMinus className="w-3 h-3 mr-1" />Unfollow</> : <><UserPlus className="w-3 h-3 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
-                  </Button>
+                  <div className="flex gap-2 ml-2 flex-shrink-0">
+                    <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" disabled={followLoading}>
+                      {isCurrentlyFollowing ? <><UserMinus className="w-3 h-3 mr-1" />Unfollow</> : <><UserPlus className="w-3 h-3 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
+                    </Button>
+                    <Button onClick={() => onNavigate?.(`messaging-${userId}`)} variant="outline" size="sm" className="border-border">
+                      <MessageCircle className="w-3 h-3 mr-1" />
+                      Message
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>
@@ -239,9 +245,15 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
               {isOwnProfile ? (
                 <Button variant="outline" size="sm" className="border-border hover:border-primary hover:text-primary" onClick={() => onNavigate?.("edit-profile")}>Edit Profile</Button>
               ) : (
-                <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" className="flex-shrink-0" disabled={followLoading}>
-                  {isCurrentlyFollowing ? <><UserMinus className="w-4 h-4 mr-1" />Unfollow</> : <><UserPlus className="w-4 h-4 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
-                </Button>
+                <div className="flex gap-2 flex-shrink-0">
+                  <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" disabled={followLoading}>
+                    {isCurrentlyFollowing ? <><UserMinus className="w-4 h-4 mr-1" />Unfollow</> : <><UserPlus className="w-4 h-4 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
+                  </Button>
+                  <Button onClick={() => onNavigate?.(`messaging-${userId}`)} variant="outline" size="sm" className="border-border">
+                    <MessageCircle className="w-4 h-4 mr-1" />
+                    Message
+                  </Button>
+                </div>
               )}
             </div>
             {displayBio && <p className="text-foreground text-sm md:text-base mb-4">{displayBio}</p>}

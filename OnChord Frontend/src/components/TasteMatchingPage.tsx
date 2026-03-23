@@ -3,7 +3,7 @@ import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Avatar } from "./ui/avatar";
-import { Users, Sparkles, UserPlus, UserCheck, Loader2, AlertCircle, RefreshCw, Music } from "lucide-react";
+import { Users, Sparkles, UserPlus, UserCheck, Loader2, AlertCircle, RefreshCw, Music, MessageCircle } from "lucide-react";
 import { useSupabaseFollows } from "../lib/useSupabaseFollows";
 import { supabase } from "../lib/supabaseClient";
 import { toast } from "sonner";
@@ -434,27 +434,37 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
                   </div>
                 )}
 
-                {/* Connect Button */}
-                <Button 
-                  className={`w-full transition-all ${
-                    isFollowing(user.id)
-                      ? "bg-secondary hover:bg-secondary/90 text-secondary-foreground"
-                      : "bg-primary hover:bg-primary/90 text-primary-foreground"
-                  }`}
-                  onClick={() => handleConnectClick(user.id, user.display_name || "User")}
-                >
-                  {isFollowing(user.id) ? (
-                    <>
-                      <UserCheck className="w-4 h-4 mr-2" />
-                      Connected
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Connect
-                    </>
-                  )}
-                </Button>
+                {/* Connect + Message Buttons */}
+                <div className="flex gap-2">
+                  <Button 
+                    className={`flex-1 transition-all ${
+                      isFollowing(user.id)
+                        ? "bg-secondary hover:bg-secondary/90 text-secondary-foreground"
+                        : "bg-primary hover:bg-primary/90 text-primary-foreground"
+                    }`}
+                    onClick={() => handleConnectClick(user.id, user.display_name || "User")}
+                  >
+                    {isFollowing(user.id) ? (
+                      <>
+                        <UserCheck className="w-4 h-4 mr-2" />
+                        Connected
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Connect
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    size="icon"
+                    onClick={() => onNavigate?.(`messaging-${user.id}`)}
+                    className="flex-shrink-0"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                  </Button>
+                </div>
               </Card>
             );
           })}

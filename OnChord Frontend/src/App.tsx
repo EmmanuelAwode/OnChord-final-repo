@@ -751,6 +751,19 @@ const handleSubmitReview = async (reviewData: {
       case "friends-reviews":
         return <FriendsReviewsPage onNavigate={navigate} onOpenAlbum={handleOpenAlbumModal} onBack={goBack} canGoBack={canGoBack} />;
       default:
+        // Check if it's a messaging page with a specific user  
+        if (currentPage.startsWith("messaging-")) {
+          const targetUserId = currentPage.replace("messaging-", "");
+          return (
+            <MessagingPage 
+              onBack={goBack} 
+              canGoBack={canGoBack} 
+              onOpenAlbum={handleOpenAlbumModal} 
+              onNavigate={navigate}
+              targetUserId={targetUserId}
+            />
+          );
+        }
         // Check if it's a settings page with a specific tab
         if (currentPage.startsWith("settings-")) {
           const settingsTab = currentPage.replace("settings-", "");
