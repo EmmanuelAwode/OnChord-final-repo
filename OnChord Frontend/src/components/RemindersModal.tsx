@@ -7,7 +7,7 @@ import { Card } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Bell, Calendar, MapPin, Music, Trash2, X, Clock, Ticket, Disc } from "lucide-react";
 import { useReminders } from "../lib/useReminders";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { EventModal } from "./EventModal";
 
 interface RemindersModalProps {

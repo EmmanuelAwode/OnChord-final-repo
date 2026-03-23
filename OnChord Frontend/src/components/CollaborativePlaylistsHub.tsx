@@ -6,7 +6,7 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Users, Plus, Music, Search, UserPlus, Sparkles } from "lucide-react";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
 import { getFollowing } from "../lib/api/follows";

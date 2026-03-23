@@ -5,7 +5,7 @@ import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { useLists } from "../lib/ListsContext";
 import { AddToListDialog } from "./AddToListDialog";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 
 interface CollectionDetailPageProps {

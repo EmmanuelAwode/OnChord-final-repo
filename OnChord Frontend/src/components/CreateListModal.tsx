@@ -8,7 +8,7 @@ import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
 import { X, Search, Plus, Globe, Lock, Users, Music, Loader2 } from "lucide-react";
 import { searchTracks, type Track } from "../lib/api/musicSearch";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 
 interface CreateListModalProps {
   isOpen: boolean;

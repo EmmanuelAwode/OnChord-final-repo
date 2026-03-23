@@ -10,7 +10,7 @@ import { Slider } from "./ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { PageHeader } from "./PageHeader";
 import { initiateSpotifyLogin, getSpotifyConnection, disconnectSpotify, handleSpotifyCallback } from "../lib/api/spotify";
 import { supabase } from "../lib/supabaseClient";

@@ -27,7 +27,7 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { useLists } from "../lib/ListsContext";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 
 interface ViewListPageProps {
   listId: string;
