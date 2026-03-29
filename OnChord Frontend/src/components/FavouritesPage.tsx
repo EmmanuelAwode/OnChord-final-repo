@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Heart, Music, Disc3, Play, Trash2, Calendar, ArrowUpDown } from "lucide-react";
 import { useFavourites } from "../lib/useFavourites";
 import { EmptyState } from "./EmptyState";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { formatDateForDisplay } from "../lib/localeFormatting";
 
 interface FavouritesPageProps {

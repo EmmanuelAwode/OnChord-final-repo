@@ -31,7 +31,7 @@ ENV VITE_SPOTIFY_REDIRECT_URI=$VITE_SPOTIFY_REDIRECT_URI
 ENV VITE_TICKETMASTER_API_KEY=$VITE_TICKETMASTER_API_KEY
 ENV VITE_ML_SERVICE_URL=$VITE_ML_SERVICE_URL
 
-# Build the application
+# Build the application with environment variables
 RUN npm run build
 
 # Production stage
@@ -40,8 +40,8 @@ FROM nginx:alpine AS production
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy built assets from builder (vite outputs to 'build' directory)
-COPY --from=builder /app/build /usr/share/nginx/html
+# Copy built assets from builder (vite outputs to 'dist' directory)
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Expose port 80
 EXPOSE 80

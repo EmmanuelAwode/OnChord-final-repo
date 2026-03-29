@@ -30,9 +30,10 @@ interface MessagingPageProps {
   onNavigate?: (page: string) => void;
   onViewProfile?: (userId: string) => void;
   onOpenAlbum?: (album: { id: string; title?: string; artist?: string; cover?: string; type?: string } | string) => void;
+  targetUserId?: string; // Auto-open conversation with this user
 }
 
-export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, onOpenAlbum }: MessagingPageProps) {
+export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, onOpenAlbum, targetUserId }: MessagingPageProps) {
   const [userId, setUserId] = useState<string | null>(null);
   
   // Get user on mount
@@ -48,6 +49,31 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
   const [conversationMessages, setConversationMessages] = useState<DirectMessage[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // Auto-initialize conversation with target user if provided
+  useEffect(() => {
+    if (!targetUserId || !userId || dm.conversations.length === 0) return;
+    
+    // Find existing conversation or create new one
+    const existingConv = dm.conversations.find(c => 
+      c.other_user?.id === targetUserId || c.participants?.includes(targetUserId)
+    );
+    
+    if (existingConv) {
+      setSelectedConversation(existingConv);
+    } else {
+      // Create new conversation with target user
+      (async () => {
+        const conversationId = await dm.getOrCreateConversation(targetUserId);
+        if (conversationId) {
+          await dm.fetchConversations();
+          const conv = dm.conversations.find(c => c.id === conversationId);
+          if (conv) setSelectedConversation(conv);
+        }
+      })();
+    }
+  }, [targetUserId, userId, dm.conversations]);
+  
   const [showGifModal, setShowGifModal] = useState(false);
   const [showShareTrackModal, setShowShareTrackModal] = useState(false);
   const [showNewMessageModal, setShowNewMessageModal] = useState(false);

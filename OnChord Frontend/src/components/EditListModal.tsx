@@ -9,7 +9,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { X, Search, Plus, Globe, Lock, Users, Music, Loader2, Trash2 } from "lucide-react";
 import { searchTracks, type Track } from "../lib/api/musicSearch";
 import { type ListSong } from "../lib/ListsContext";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 
 interface EditListModalProps {
   isOpen: boolean;

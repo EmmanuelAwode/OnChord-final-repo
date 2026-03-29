@@ -50,7 +50,7 @@
       },
     },
     build: {
-      target: 'esnext',
+      target: 'ES2020',
       outDir: 'dist',
       chunkSizeWarningLimit: 600,
       rollupOptions: {

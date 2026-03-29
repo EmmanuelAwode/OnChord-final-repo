@@ -19,7 +19,7 @@ import { useTopArtists } from "../lib/useSpotify";
 import { useProfile } from "../lib/useProfile";
 import { getFollowerCount, getFollowingCount, getFollowers, getFollowing } from "../lib/api/follows";
 import { getProfiles, type Profile } from "../lib/api/profiles";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { AddToListDialog } from "./AddToListDialog";
 import { supabase } from "../lib/supabaseClient";
 

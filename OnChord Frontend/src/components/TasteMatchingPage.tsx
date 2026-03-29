@@ -3,13 +3,15 @@ import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Avatar } from "./ui/avatar";
-import { Users, Sparkles, UserPlus, UserCheck, Loader2, AlertCircle, RefreshCw, Music } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { Users, Sparkles, UserPlus, UserCheck, Loader2, AlertCircle, RefreshCw, Music, MessageCircle, MoreVertical, Ban } from "lucide-react";
 import { useSupabaseFollows } from "../lib/useSupabaseFollows";
 import { supabase } from "../lib/supabaseClient";
 import { toast } from "sonner";
 import { checkMlServiceHealth, getEnhancedTasteSimilarity, type MlServiceHealth } from "../lib/api/mlService";
 import { type Profile } from "../lib/api/profiles";
 import { getUserMusicData, type UserMusicData } from "../lib/api/tasteMatching";
+import { blockUser, unblockUser, isBlocked } from "../lib/api/follows";
 
 interface TasteMatchingPageProps {
   onNavigate?: (page: string) => void;
@@ -37,6 +39,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
   }>>({});
   const [isComputingAll, setIsComputingAll] = useState(false);
   const [loadingMyData, setLoadingMyData] = useState(false);
+  const [blockedState, setBlockedState] = useState<Record<string, boolean>>({});
   
   // Load current user ID and their music data
   useEffect(() => {
@@ -230,6 +233,24 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
       }
     } catch (error) {
       toast.error(`Failed to ${wasFollowing ? 'disconnect from' : 'connect with'} ${userName}`);
+    }
+  };
+
+  const handleToggleBlock = async (userId: string, userName: string) => {
+    try {
+      const isCurrentlyBlocked = blockedState[userId];
+      
+      if (isCurrentlyBlocked) {
+        await unblockUser(userId);
+        setBlockedState(prev => ({ ...prev, [userId]: false }));
+        toast.success(`Unblocked ${userName}`);
+      } else {
+        await blockUser(userId);
+        setBlockedState(prev => ({ ...prev, [userId]: true }));
+        toast.success(`Blocked ${userName}`);
+      }
+    } catch (error) {
+      toast.error("Failed to update block status");
     }
   };
 
@@ -434,27 +455,50 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
                   </div>
                 )}
 
-                {/* Connect Button */}
-                <Button 
-                  className={`w-full transition-all ${
-                    isFollowing(user.id)
-                      ? "bg-secondary hover:bg-secondary/90 text-secondary-foreground"
-                      : "bg-primary hover:bg-primary/90 text-primary-foreground"
-                  }`}
-                  onClick={() => handleConnectClick(user.id, user.display_name || "User")}
-                >
-                  {isFollowing(user.id) ? (
-                    <>
-                      <UserCheck className="w-4 h-4 mr-2" />
-                      Connected
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Connect
-                    </>
-                  )}
-                </Button>
+                {/* Connect + Message Buttons */}
+                <div className="flex gap-2">
+                  <Button 
+                    className={`flex-1 transition-all ${
+                      isFollowing(user.id)
+                        ? "bg-secondary hover:bg-secondary/90 text-secondary-foreground"
+                        : "bg-primary hover:bg-primary/90 text-primary-foreground"
+                    }`}
+                    onClick={() => handleConnectClick(user.id, user.display_name || "User")}
+                  >
+                    {isFollowing(user.id) ? (
+                      <>
+                        <UserCheck className="w-4 h-4 mr-2" />
+                        Connected
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Connect
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    size="icon"
+                    onClick={() => onNavigate?.(`messaging-${user.id}`)}
+                    className="flex-shrink-0"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" className="flex-shrink-0">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleToggleBlock(user.id, user.display_name || "User")}>
+                        <Ban className="w-4 h-4 mr-2" />
+                        {blockedState[user.id] ? "Unblock" : "Block"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </Card>
             );
           })}

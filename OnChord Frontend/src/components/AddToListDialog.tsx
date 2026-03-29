@@ -6,7 +6,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { useLists, ListSong } from "../lib/ListsContext";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 import { searchTracks } from "../lib/api/musicSearch";
 import { spotifySearch, isSpotifyConnected } from "../lib/api/spotify";
 

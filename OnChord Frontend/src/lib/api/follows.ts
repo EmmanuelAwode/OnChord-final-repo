@@ -132,3 +132,56 @@ export async function getFollowingCount(userId: string): Promise<number> {
 
   return data || 0;
 }
+
+/**
+ * Block a user
+ */
+export async function blockUser(userId: string): Promise<void> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) throw new Error("Not authenticated");
+
+  const { error } = await supabase.from("blocks").insert({
+    blocker_id: session.session.user.id,
+    blocked_id: userId,
+  });
+
+  if (error) throw error;
+}
+
+/**
+ * Unblock a user
+ */
+export async function unblockUser(userId: string): Promise<void> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) throw new Error("Not authenticated");
+
+  const { error } = await supabase
+    .from("blocks")
+    .delete()
+    .eq("blocker_id", session.session.user.id)
+    .eq("blocked_id", userId);
+
+  if (error) throw error;
+}
+
+/**
+ * Check if current user has blocked another user
+ */
+export async function isBlocked(userId: string): Promise<boolean> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) return false;
+
+  const { data, error } = await supabase
+    .from("blocks")
+    .select("id")
+    .eq("blocker_id", session.session.user.id)
+    .eq("blocked_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error checking block status:", error);
+    return false;
+  }
+
+  return !!data;
+}

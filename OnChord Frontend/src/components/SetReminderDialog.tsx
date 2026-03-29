@@ -6,7 +6,7 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Calendar, Clock, MapPin, Check } from "lucide-react";
 import { useReminders } from "../lib/useReminders";
-import { toast } from "sonner@2.0.3";
+import { toast } from "sonner";
 
 interface SetReminderDialogProps {
   isOpen: boolean;
