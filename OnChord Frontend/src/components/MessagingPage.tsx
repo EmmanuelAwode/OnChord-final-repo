@@ -137,7 +137,7 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
       });
       dm.markAsRead(selectedConversation.id);
       
-      // Subscribe to new messages
+      // Subscribe to new messages for this specific conversation
       channelRef.current = dm.subscribeToMessages(selectedConversation.id, (newMsg) => {
         setConversationMessages(prev => [...prev, newMsg]);
         if (newMsg.sender_id !== userId) {
