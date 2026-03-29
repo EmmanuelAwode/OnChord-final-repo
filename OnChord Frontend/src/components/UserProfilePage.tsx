@@ -187,74 +187,85 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
     <div className="space-y-6 animate-fade-in">
       {canGoBack && <BackButton onClick={onBack || (() => onNavigate?.("home"))} label="Back" />}
 
-      {/* Profile Header */}
-      <Card className="p-4 md:p-6 bg-card border-border">
-        <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
-          <div className="flex items-start gap-4 sm:contents">
+      {/* Profile Header - Instagram Style */}
+      <Card className="p-6 md:p-8 bg-card border-border">
+        <div className="flex flex-col items-center text-center gap-4">
+          {/* Avatar */}
+          <div>
             {displayAvatar ? (
               <img
                 src={displayAvatar}
                 alt={displayName}
-                className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover flex-shrink-0"
+                className="w-32 h-32 md:w-40 md:h-40 rounded-full object-cover border-4 border-primary/30"
               />
             ) : (
-              <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
-                <span className="text-primary text-3xl md:text-4xl font-medium">
+              <div className="w-32 h-32 md:w-40 md:h-40 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center border-4 border-primary/30">
+                <span className="text-primary text-6xl md:text-7xl font-medium">
                   {displayName.charAt(0).toUpperCase()}
                 </span>
               </div>
             )}
-            {/* Name + button inline with avatar on mobile */}
-            <div className="flex-1 sm:hidden">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-xl text-foreground font-semibold">{displayName}</h2>
-                  {displayUsername && <p className="text-sm text-muted-foreground">{displayUsername}</p>}
-                  {followsYou && !isOwnProfile && (
-                    <Badge variant="outline" className="border-secondary/50 text-secondary text-xs mt-1">Follows you</Badge>
-                  )}
-                </div>
-                {isOwnProfile ? (
-                  <Button variant="outline" size="sm" className="border-border ml-2 flex-shrink-0" onClick={() => onNavigate?.("edit-profile")}>
-                    Edit
-                  </Button>
-                ) : (
-                  <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" className="flex-shrink-0 ml-2" disabled={followLoading}>
-                    {isCurrentlyFollowing ? <><UserMinus className="w-3 h-3 mr-1" />Unfollow</> : <><UserPlus className="w-3 h-3 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
-                  </Button>
-                )}
-              </div>
+          </div>
+
+          {/* Name and Username */}
+          <div className="space-y-1">
+            <h2 className="text-3xl md:text-4xl text-foreground font-bold">{displayName}</h2>
+            {displayUsername && <p className="text-lg text-muted-foreground">{displayUsername}</p>}
+          </div>
+
+          {/* Bio */}
+          {displayBio && <p className="text-foreground max-w-lg leading-relaxed">{displayBio}</p>}
+
+          {/* Stats Row */}
+          <div className="flex gap-8 md:gap-12 justify-center w-full py-4">
+            <div className="text-center">
+              <p className="text-2xl md:text-3xl text-foreground font-bold">{userReviews.length}</p>
+              <p className="text-sm text-muted-foreground">Reviews</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl md:text-3xl text-foreground font-bold">{followersCount}</p>
+              <p className="text-sm text-muted-foreground">Followers</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl md:text-3xl text-foreground font-bold">{followingCount}</p>
+              <p className="text-sm text-muted-foreground">Following</p>
             </div>
           </div>
-          <div className="flex-1">
-            {/* Name + button on larger screens */}
-            <div className="hidden sm:flex items-start justify-between mb-2">
-              <div>
-                <h2 className="text-2xl text-foreground">{displayName}</h2>
-                {displayUsername && <p className="text-muted-foreground">{displayUsername}</p>}
-                {followsYou && !isOwnProfile && (
-                  <Badge variant="outline" className="border-secondary/50 text-secondary text-xs mt-1">Follows you</Badge>
+
+          {/* Follows You Badge */}
+          {followsYou && !isOwnProfile && (
+            <Badge className="bg-secondary/20 text-secondary border-secondary/30 text-sm py-1 px-3">
+              ✓ Follows you
+            </Badge>
+          )}
+
+          {/* Follow/Edit Button - Full Width */}
+          <div className="w-full max-w-xs">
+            {!isOwnProfile && (
+              <Button 
+                onClick={handleToggleFollow} 
+                variant="default"
+                size="lg"
+                className="w-full text-lg font-semibold py-6 bg-primary hover:bg-primary/90"
+                disabled={followLoading}
+              >
+                {isCurrentlyFollowing ? (
+                  <><UserMinus className="w-5 h-5 mr-2" />Unfollow</>
+                ) : (
+                  <><UserPlus className="w-5 h-5 mr-2" />{followsYou ? "Follow Back" : "Follow"}</>
                 )}
-              </div>
-              {isOwnProfile ? (
-                <Button variant="outline" size="sm" className="border-border hover:border-primary hover:text-primary" onClick={() => onNavigate?.("edit-profile")}>Edit Profile</Button>
-              ) : (
-                <Button onClick={handleToggleFollow} variant={isCurrentlyFollowing ? "outline" : "default"} size="sm" className="flex-shrink-0" disabled={followLoading}>
-                  {isCurrentlyFollowing ? <><UserMinus className="w-4 h-4 mr-1" />Unfollow</> : <><UserPlus className="w-4 h-4 mr-1" />{followsYou ? "Follow Back" : "Follow"}</>}
-                </Button>
-              )}
-            </div>
-            {displayBio && <p className="text-foreground text-sm md:text-base mb-4">{displayBio}</p>}
-            <div className="flex gap-4 md:gap-6">
-              <div>
-                <p className="text-foreground font-medium">{followersCount}</p>
-                <p className="text-xs md:text-sm text-muted-foreground">Followers</p>
-              </div>
-              <div>
-                <p className="text-foreground font-medium">{followingCount}</p>
-                <p className="text-xs md:text-sm text-muted-foreground">Following</p>
-              </div>
-            </div>
+              </Button>
+            )}
+            {isOwnProfile && (
+              <Button 
+                variant="outline" 
+                size="lg"
+                className="w-full text-lg font-semibold py-6 border-primary text-primary hover:bg-primary/10"
+                onClick={() => onNavigate?.("edit-profile")}
+              >
+                Edit Profile
+              </Button>
+            )}
           </div>
         </div>
       </Card>

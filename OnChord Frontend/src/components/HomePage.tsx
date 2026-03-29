@@ -134,27 +134,46 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
   // Load personalized releases and concerts
   useEffect(() => {
     async function loadPersonalizedData() {
-      // Load releases
-      setLoadingReleases(true);
-      try {
-        const releases = await getPersonalizedNewReleases(4);
-        setPersonalizedReleases(releases);
-      } catch (err) {
-        console.error("Failed to load personalized releases:", err);
-      } finally {
-        setLoadingReleases(false);
-      }
+      // Create timeout promise
+      const timeoutPromise = (ms: number) => new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), ms)
+      );
 
-      // Load concerts
+      // Load releases in parallel with timeout (Spotify usually fast, 20 seconds)
+      setLoadingReleases(true);
+      Promise.race([
+        getPersonalizedNewReleases(4),
+        timeoutPromise(20000) // Increased to 20 seconds for better reliability
+      ])
+        .then(releases => {
+          setPersonalizedReleases(releases as typeof personalizedReleases);
+        })
+        .catch(err => {
+          console.error("Failed to load personalized releases:", err.message);
+          // Set fallback data on timeout or error
+          setPersonalizedReleases([]);
+        })
+        .finally(() => {
+          setLoadingReleases(false);
+        });
+
+      // Load concerts in parallel with timeout (Ticketmaster can be slow with multiple artists)
       setLoadingConcerts(true);
-      try {
-        const concerts = await getPersonalizedConcerts(4);
-        setPersonalizedConcerts(concerts);
-      } catch (err) {
-        console.error("Failed to load personalized concerts:", err);
-      } finally {
-        setLoadingConcerts(false);
-      }
+      Promise.race([
+        getPersonalizedConcerts(4),
+        timeoutPromise(60000) // Increased to 60 seconds: accounts for 15 artists × rate limiter + network latency
+      ])
+        .then(concerts => {
+          setPersonalizedConcerts(concerts as typeof personalizedConcerts);
+        })
+        .catch(err => {
+          console.error("Failed to load personalized concerts:", err.message);
+          // Set fallback data on timeout or error
+          setPersonalizedConcerts([]);
+        })
+        .finally(() => {
+          setLoadingConcerts(false);
+        });
     }
     loadPersonalizedData();
   }, [currentUserId]);
@@ -274,6 +293,73 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
     : [];
 
   const hasSearchResults = searchQuery.trim() && (searchAlbumsResults.length > 0 || searchUsersResults.length > 0 || filteredReviews.length > 0);
+
+  // Show loading screen while initial data loads
+  // Show if either is still loading and we haven't started showing any content yet
+  const isInitialLoading = loadingReleases || loadingConcerts;
+  const hasAnyContent = personalizedReleases.length > 0 || personalizedConcerts.length > 0;
+
+  if (isInitialLoading && !hasAnyContent) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center justify-center gap-6 px-4">
+          {/* Animated Loading Icon */}
+          <div className="relative">
+            <div className="w-16 h-16 rounded-full border-4 border-muted border-t-primary animate-spin"></div>
+            <Music2 className="w-8 h-8 text-primary absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+          </div>
+          
+          {/* Loading Text */}
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl font-semibold text-foreground">Loading Your Dashboard</h2>
+            <p className="text-muted-foreground">Fetching personalized releases and concerts...</p>
+          </div>
+
+          {/* Loading Progress Indicators */}
+          <div className="mt-4 space-y-3 w-full max-w-xs">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  <Sparkles className="w-4 h-4 inline-block mr-2" />
+                  Releases
+                </span>
+                {loadingReleases ? (
+                  <span className="text-primary text-xs">Loading...</span>
+                ) : (
+                  <span className="text-green-500 text-xs">✓ Ready</span>
+                )}
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div className={`h-full ${loadingReleases ? "bg-primary animate-pulse" : "bg-green-500"} rounded-full transition-all duration-500`} style={{ width: loadingReleases ? "60%" : "100%" }}></div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  <MapPin className="w-4 h-4 inline-block mr-2" />
+                  Concerts
+                </span>
+                {loadingConcerts ? (
+                  <span className="text-primary text-xs">Loading...</span>
+                ) : (
+                  <span className="text-green-500 text-xs">✓ Ready</span>
+                )}
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div className={`h-full ${loadingConcerts ? "bg-primary animate-pulse" : "bg-green-500"} rounded-full transition-all duration-500`} style={{ width: loadingConcerts ? "45%" : "100%" }}></div>
+              </div>
+            </div>
+          </div>
+
+          {/* Tip */}
+          <p className="text-xs text-muted-foreground mt-4 text-center max-w-xs">
+            Personalizing your content based on your music taste...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen relative pb-12">
@@ -823,8 +909,8 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
                   // Empty state when no releases
                   <Card className="p-6 bg-card border-border text-center">
                     <TrendingUp className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-muted-foreground">No new releases to show</p>
-                    <p className="text-xs text-muted-foreground mt-1">Connect Spotify to get personalized recommendations</p>
+                    <p className="text-muted-foreground">No new releases found</p>
+                    <p className="text-xs text-muted-foreground mt-1">Check back soon for the latest releases from your favorite artists</p>
                   </Card>
                 )}
               </div>

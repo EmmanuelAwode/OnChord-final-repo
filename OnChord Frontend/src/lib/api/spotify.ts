@@ -4,6 +4,7 @@ import { supabase } from "../supabaseClient";
 
 const SPOTIFY_CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID as string;
 const SPOTIFY_REDIRECT_URI = import.meta.env.VITE_SPOTIFY_REDIRECT_URI as string;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 
 // Spotify OAuth scopes
 const SPOTIFY_SCOPES = [
@@ -229,8 +230,8 @@ export async function handleSpotifyCallback(code: string) {
 // ============================================
 
 /**
- * Refreshes the Spotify access token using the refresh_token.
- * PKCE refresh doesn't require a client_secret — just client_id + refresh_token.
+ * Refreshes the Spotify access token using the Supabase Edge Function.
+ * The edge function securely handles the refresh with client_secret.
  */
 async function refreshAccessToken(refreshToken: string): Promise<string> {
   if (!refreshToken) {
@@ -240,16 +241,19 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
     throw new Error("Spotify refresh token missing. Please reconnect your Spotify account.");
   }
 
-  const response = await fetch("https://accounts.spotify.com/api/token", {
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData.session) {
+    throw new Error("Not authenticated");
+  }
+
+  // Call the Supabase Edge Function which handles token refresh securely
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  const response = await fetch(`${supabaseUrl}/functions/v1/spotify-refresh`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Authorization": `Bearer ${sessionData.session.access_token}`,
+      "Content-Type": "application/json",
     },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: SPOTIFY_CLIENT_ID,
-    }),
   });
 
   if (!response.ok) {
@@ -257,30 +261,45 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
     cachedAccessToken = null;
     cachedTokenExpiry = 0;
     refreshBlockedUntil = Date.now() + 5 * 60 * 1000;
+    const errorText = await response.text();
+    console.error("Token refresh failed:", errorText);
+    
+    // Check if it's a credentials configuration issue
+    if (errorText.includes('not configured') || errorText.includes('Spotify credentials')) {
+      throw new Error("Spotify credentials not configured on server. Please contact admin to set up Edge Function secrets.");
+    }
+    
+    // Check if refresh token was revoked
+    const isRevokedToken = errorText.includes('invalid_grant') || 
+                          errorText.includes('Refresh token revoked') ||
+                          errorText.includes('server_error');
+    
+    if (isRevokedToken) {
+      // Clear Spotify connection from database
+      try {
+        const { data: session } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          await supabase
+            .from('spotify_connections')
+            .delete()
+            .eq('user_id', session.user.id);
+        }
+      } catch (err) {
+        console.warn('Failed to clear Spotify connection:', err);
+      }
+      setManualDisconnectFlag(true);
+      throw new Error("Your Spotify connection was revoked. Please reconnect your Spotify account in Settings.");
+    }
+    
     throw new Error("Spotify session expired. Please reconnect your Spotify account.");
   }
 
   const data = await response.json();
 
-  // Update tokens in Supabase
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (sessionData.session) {
-    const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString();
-    await supabase
-      .from("spotify_connections")
-      .update({
-        access_token: data.access_token,
-        // Spotify may or may not return a new refresh_token
-        ...(data.refresh_token ? { refresh_token: data.refresh_token } : {}),
-        expires_at: expiresAt,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", sessionData.session.user.id);
-  }
-
-  // Update cache
+  // Update cache with new token
   cachedAccessToken = data.access_token;
-  cachedTokenExpiry = Date.now() + data.expires_in * 1000;
+  const expiresAt = new Date(data.expires_at).getTime();
+  cachedTokenExpiry = expiresAt;
 
   return data.access_token;
 }
@@ -327,7 +346,7 @@ export async function getSpotifyAccessToken(): Promise<string> {
     return connection.access_token;
   }
 
-  // Token expired — refresh it
+  // Token expired — refresh it using Supabase Edge Function
   return refreshAccessToken(connection.refresh_token ?? "");
 }
 
@@ -409,17 +428,27 @@ export async function disconnectSpotify() {
 
 /**
  * Helper to make authenticated Spotify API requests with auto-retry on 401
+ * Includes timeout protection to prevent slow requests from blocking the UI
  */
-async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Response> {
+async function spotifyFetch(url: string, options: RequestInit = {}, timeoutMs: number = 15000): Promise<Response> {
   const accessToken = await getSpotifyAccessToken();
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers,
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  // Create timeout promise
+  const timeoutPromise = new Promise<Response>((_, reject) => 
+    setTimeout(() => reject(new Error('Spotify API timeout')), timeoutMs)
+  );
+
+  // Race fetch against timeout
+  const response = await Promise.race([
+    fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }),
+    timeoutPromise
+  ]);
 
   // Handle 403 errors
   if (response.status === 403) {
@@ -440,13 +469,16 @@ async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Res
     cachedAccessToken = null;
     cachedTokenExpiry = 0;
     const newToken = await getSpotifyAccessToken();
-    return fetch(url, {
-      ...options,
-      headers: {
-        ...options.headers,
-        Authorization: `Bearer ${newToken}`,
-      },
-    });
+    return Promise.race([
+      fetch(url, {
+        ...options,
+        headers: {
+          ...options.headers,
+          Authorization: `Bearer ${newToken}`,
+        },
+      }),
+      timeoutPromise
+    ]);
   }
 
   return response;

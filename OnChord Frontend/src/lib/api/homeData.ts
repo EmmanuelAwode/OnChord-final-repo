@@ -60,6 +60,7 @@ let isLoadingReleases = false;
 /**
  * Get new releases from the user's top artists
  * Fetches each artist's latest albums and returns the most recent ones
+ * Includes timeout and error handling to prevent slow page loads
  */
 export async function getPersonalizedNewReleases(limit: number = 4): Promise<PersonalizedRelease[]> {
   try {
@@ -86,9 +87,29 @@ export async function getPersonalizedNewReleases(limit: number = 4): Promise<Per
       return getFallbackReleases();
     }
 
-    // Get user's top artists
-    const topArtistsResponse = await getUserTopArtists("medium_term", 10);
-    const topArtists = topArtistsResponse?.items || [];
+    // Get user's top artists with timeout
+    let topArtists: any[] = [];
+    try {
+      const topArtistsResponse = await Promise.race([
+        getUserTopArtists("medium_term", 10),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000))
+      ]);
+      topArtists = topArtistsResponse?.items || [];
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      // Check if it's a Spotify session error
+      const isSpotifySessionError = errorMsg.includes('revoked') || 
+                                   errorMsg.includes('expired') || 
+                                   errorMsg.includes('invalid_grant');
+      
+      if (isSpotifySessionError) {
+        console.error("Spotify session error - user needs to reconnect:", errorMsg);
+      } else {
+        console.error("Failed to get top artists:", err);
+      }
+      isLoadingReleases = false;
+      return getFallbackReleases();
+    }
 
     if (topArtists.length === 0) {
       isLoadingReleases = false;
@@ -96,13 +117,17 @@ export async function getPersonalizedNewReleases(limit: number = 4): Promise<Per
     }
 
     // Fetch latest albums for each artist sequentially with rate limiting
-    // Only fetch from top 3 artists to reduce API calls
+    // Fetch from more artists to improve chances of getting results (10 artists)
     const allAlbums: any[] = [];
-    for (const artist of topArtists.slice(0, 3)) {
+    let successCount = 0;
+    for (const artist of topArtists.slice(0, 10)) {
       try {
-        const response = await spotifyFetch(
-          `https://api.spotify.com/v1/artists/${artist.id}/albums?include_groups=album,single&market=US&limit=3`
-        );
+        const response = await Promise.race([
+          spotifyFetch(
+            `https://api.spotify.com/v1/artists/${artist.id}/albums?include_groups=album,single&market=US&limit=3`
+          ),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 12000))
+        ]) as Response;
         if (response.ok) {
           const data = await response.json();
           const albums = (data.items || []).map((album: any) => ({
@@ -111,16 +136,26 @@ export async function getPersonalizedNewReleases(limit: number = 4): Promise<Per
             artistId: artist.id,
           }));
           allAlbums.push(...albums);
+          successCount++;
         } else if (response.status === 429) {
           // Rate limited - stop making more requests and use what we have
           console.log("Spotify rate limited, using cached/partial data");
           break;
         }
-        // Add longer delay between requests to avoid rate limiting (300ms)
+        // Add delay between requests to avoid rate limiting (300ms)
         await delay(300);
       } catch (err) {
-        // Silently continue with other artists
+        // Silently continue with other artists - could be timeout or rate limit
+        console.debug("Skipping artist (timeout or error):", err);
       }
+    }
+
+    // If we got no results from any artist, still return empty instead of fallback
+    if (allAlbums.length === 0) {
+      console.warn("No albums found from user's top artists");
+      isLoadingReleases = false;
+      // Return empty array instead of fallback so UI can show proper empty state
+      return [];
     }
 
     // Sort by release date (newest first)
@@ -223,21 +258,8 @@ async function getFallbackReleases(): Promise<PersonalizedRelease[]> {
     console.error("Fallback releases error:", err);
   }
 
-  // Return static fallback data
-  return [
-    {
-      id: "fallback-1",
-      title: "Connect Spotify",
-      artist: "to see personalized releases",
-      artistId: "",
-      cover: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400",
-      releaseDate: "Now",
-      releaseDateISO: new Date().toISOString(),
-      type: "Album",
-      trackCount: 0,
-      duration: "--:--",
-    },
-  ];
+  // Return empty array instead of placeholder
+  return [];
 }
 
 /**
@@ -330,14 +352,5 @@ export async function getPersonalizedConcerts(limit: number = 4): Promise<Person
  * Fallback concerts when no personalized data available
  */
 function getFallbackConcerts(): PersonalizedEvent[] {
-  return [
-    {
-      id: "fallback-concert-1",
-      artistName: "No upcoming concerts",
-      venue: "Connect Spotify to see personalized events",
-      city: "",
-      date: "",
-      dateISO: "",
-    },
-  ];
+  return [];
 }

@@ -279,29 +279,38 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
     try {
       // Get user's favorite artists from Supabase
       const favorites = await getFavorites('artist');
+      console.log(`📍 Retrieved ${favorites.length} favorite artists from database:`, favorites);
+      
       const artistNames = favorites
         .map(f => f.item_artist || f.item_title)
         .filter((name): name is string => !!name);
       
+      console.log(`🎤 Extracted ${artistNames.length} artist names for concert search:`, artistNames);
       setFavoriteArtists(artistNames);
       
       if (artistNames.length === 0) {
-        console.log('No favorite artists found for personalized recommendations');
+        console.log('⚠️ No favorite artists found - personalized recommendations unavailable');
         setPersonalizedEvents([]);
         return;
       }
 
       console.log('🎵 Loading concerts for favorite artists:', artistNames);
       
-      // Fetch events for favorite artists
-      const artistEvents = await getArtistEvents(artistNames.slice(0, 10), { size: 15 });
+      // Fetch events for favorite artists (pass all, getArtistEvents will limit appropriately)
+      const artistEvents = await getArtistEvents(artistNames, { size: 15 });
+      
+      console.log(`📊 Concert search completed - found ${artistEvents.length} total events`);
       
       if (artistEvents.length > 0) {
         setPersonalizedEvents(artistEvents);
-        console.log(`🎫 Found ${artistEvents.length} personalized events`);
+        console.log(`✅ Success: ${artistEvents.length} personalized events loaded`);
+      } else {
+        console.warn('⚠️ No concerts found for favorite artists - they may not be touring or names may not match Ticketmaster database');
+        setPersonalizedEvents([]);
       }
     } catch (err) {
-      console.error('Failed to load personalized events:', err);
+      console.error('❌ Failed to load personalized events:', err);
+      setPersonalizedEvents([]);
     } finally {
       setIsLoadingPersonalized(false);
     }

@@ -80,8 +80,14 @@ serve(async (req) => {
     }
 
     // Token expired or about to expire, refresh it
-    const SPOTIFY_CLIENT_ID = Deno.env.get('SPOTIFY_CLIENT_ID')!
-    const SPOTIFY_CLIENT_SECRET = Deno.env.get('SPOTIFY_CLIENT_SECRET')!
+    const SPOTIFY_CLIENT_ID = Deno.env.get('SPOTIFY_CLIENT_ID')
+    const SPOTIFY_CLIENT_SECRET = Deno.env.get('SPOTIFY_CLIENT_SECRET')
+
+    // Validate environment variables are configured
+    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
+      console.error('Missing Spotify credentials in Edge Function environment')
+      throw new Error('Spotify credentials not configured. Admin must set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in Supabase secrets.')
+    }
 
     const refreshResponse = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',

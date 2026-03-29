@@ -32,15 +32,16 @@ const getSupabaseHeaders = async (): Promise<Record<string, string>> => {
   return headers;
 };
 
-// Queue-based rate limiter for Ticketmaster API (max 5 requests per second)
+// Queue-based rate limiter for Ticketmaster API (max 5 requests per second with burst=1)
 // Uses a proper queue to ensure concurrent calls don't slip through
+// Ticketmaster's spike arrest policy is very strict - use 2 req/sec to be safe
 class RateLimiter {
   private queue: (() => void)[] = [];
   private processing = false;
   private lastRequestTime = 0;
   private minInterval: number;
 
-  constructor(requestsPerSecond: number = 3) { // Use 3 to be extra safe (well under 5 limit)
+  constructor(requestsPerSecond: number = 2) { // Use 2 to avoid spike arrest (burst=1 policy)
     this.minInterval = 1000 / requestsPerSecond;
   }
 
@@ -74,7 +75,7 @@ class RateLimiter {
   }
 }
 
-const rateLimiter = new RateLimiter(3); // 3 requests per second to stay well under limit
+const rateLimiter = new RateLimiter(2); // 2 requests per second to avoid spike arrest
 
 export interface TicketmasterEvent {
   id: string;
@@ -144,6 +145,41 @@ interface TicketmasterAPIEvent {
 }
 
 /**
+ * Retry wrapper for searchEvents with exponential backoff on rate limits
+ */
+async function searchEventsWithRetry(
+  keyword: string,
+  options: any = {},
+  retries: number = 2
+): Promise<TicketmasterEvent[]> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await searchEvents(keyword, options);
+    } catch (error) {
+      const isLastAttempt = attempt === retries;
+      const isRetryableError = error instanceof Error && 
+        (error.message.includes('429') || error.message.includes('rate') || error.message.includes('timeout'));
+      
+      if (!isLastAttempt && isRetryableError) {
+        // Exponential backoff: 1s, 2s, 4s
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.warn(`⏳ Rate limited on attempt ${attempt + 1}. Waiting ${waitTime}ms before retry...`);
+        await new Promise(r => setTimeout(r, waitTime));
+        continue;
+      }
+      
+      if (isLastAttempt) {
+        console.warn(`❌ Failed after ${retries + 1} attempts:`, error);
+        return [];
+      }
+      
+      throw error;
+    }
+  }
+  return [];
+}
+
+/**
  * Search for events by keyword (artist name, genre, etc.)
  */
 export async function searchEvents(
@@ -199,7 +235,16 @@ export async function searchEvents(
       : `/api/ticketmaster/discovery/v2/events.json?${params.toString()}`;
 
     const headers = SUPABASE_URL ? await getSupabaseHeaders() : undefined;
-    const response = await fetch(url, SUPABASE_URL ? { headers } : undefined);
+    
+    // Add timeout protection (20 seconds for Ticketmaster which can be slow on free tier)
+    const timeoutPromise = new Promise<Response>((_, reject) =>
+      setTimeout(() => reject(new Error('Ticketmaster API timeout')), 20000)
+    );
+
+    const response = await Promise.race([
+      fetch(url, SUPABASE_URL ? { headers } : undefined),
+      timeoutPromise
+    ]);
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -236,18 +281,31 @@ export async function getArtistEvents(
     // Format datetime without milliseconds (Ticketmaster requirement)
     const startDateTime = new Date().toISOString().split('.')[0] + 'Z';
     
-    // Limit artists to avoid too many requests (max 5 to stay under rate limits)
-    const limitedArtists = artistNames.slice(0, 5);
+    // Process up to 8 artists to respect rate limiting (2 req/sec = max 5 artists in 20s timeout)
+    // This ensures we finish within the HomePage timeout while respecting Ticketmaster limits
+    const limitedArtists = artistNames.slice(0, 8);
+    
+    if (limitedArtists.length === 0) {
+      console.warn('No artists provided to getArtistEvents');
+      return [];
+    }
+    
+    console.log(`🎫 Searching Ticketmaster for ${limitedArtists.length} artists:`, limitedArtists);
     
     // Fetch events for artists sequentially to respect rate limits
     const allEvents: TicketmasterEvent[][] = [];
     for (const artistName of limitedArtists) {
-      const events = await searchEvents(artistName, {
-        size: options.size || 10,
-        countryCode: options.countryCode || 'US',
-        startDateTime,
-      });
-      allEvents.push(events);
+      try {
+        const events = await searchEventsWithRetry(artistName, {
+          size: options.size || 10,
+          countryCode: options.countryCode || 'US',
+          startDateTime,
+        });
+        console.log(`  ✓ ${artistName}: ${events.length} events`);
+        allEvents.push(events);
+      } catch (err) {
+        console.warn(`  ✗ ${artistName}: failed to fetch -`, err instanceof Error ? err.message : err);
+      }
     }
     
     // Flatten and deduplicate
@@ -258,10 +316,12 @@ export async function getArtistEvents(
       }
     });
 
-    // Sort by date
-    return Array.from(uniqueEvents.values()).sort((a, b) => 
+    const sortedEvents = Array.from(uniqueEvents.values()).sort((a, b) => 
       new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime()
     );
+    
+    console.log(`🎪 Total personalized events found: ${sortedEvents.length}`);
+    return sortedEvents;
   } catch (error) {
     console.error('Failed to fetch artist events:', error);
     return [];

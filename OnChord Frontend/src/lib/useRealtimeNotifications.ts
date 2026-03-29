@@ -24,26 +24,42 @@ export function useRealtimeNotifications() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  // Get current user ID from Supabase auth
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        setCurrentUserId(session.user.id);
+      } else if (error) {
+        console.error('Failed to get auth session:', error);
+      }
+    };
+    getUser();
+  }, []);
 
   // Load initial notifications
   useEffect(() => {
-    loadNotifications();
-  }, []);
+    if (currentUserId) {
+      loadNotifications();
+    }
+  }, [currentUserId]);
 
   // Subscribe to real-time updates
   useEffect(() => {
-    const userId = localStorage.getItem('userId') || 'user-1';
+    if (!currentUserId) return;
     
-    // Subscribe to new notifications
+    // Subscribe to new notifications for this user only
     const channel = supabase
-      .channel('notifications')
+      .channel(`notifications-${currentUserId}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'notifications',
-          // filter: `user_id=eq.${userId}`, // Temporarily disabled for testing
+          filter: `user_id=eq.${currentUserId}`, // Only this user's notifications
         },
         (payload) => {
           const newNotification = transformNotification(payload.new);
@@ -60,7 +76,7 @@ export function useRealtimeNotifications() {
           event: 'UPDATE',
           schema: 'public',
           table: 'notifications',
-          // filter: `user_id=eq.${userId}`, // Temporarily disabled for testing
+          filter: `user_id=eq.${currentUserId}`, // Only this user's notifications
         },
         (payload) => {
           const updatedNotification = transformNotification(payload.new);
@@ -79,17 +95,19 @@ export function useRealtimeNotifications() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [currentUserId]);
 
   async function loadNotifications() {
+    if (!currentUserId) return;
+    
     try {
       setIsLoading(true);
-      const userId = localStorage.getItem('userId') || 'user-1';
       
+      // Only fetch notifications for the current user
       const { data, error: fetchError } = await supabase
         .from('notifications')
         .select('*')
-        // .eq('user_id', userId) // Temporarily disabled for testing with seed data
+        .eq('user_id', currentUserId)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -129,13 +147,13 @@ export function useRealtimeNotifications() {
   }
 
   async function markAllAsRead() {
+    if (!currentUserId) return;
+    
     try {
-      const userId = localStorage.getItem('userId') || 'user-1';
-      
       const { error: updateError } = await supabase
         .from('notifications')
         .update({ is_read: true })
-        .eq('user_id', userId)
+        .eq('user_id', currentUserId)
         .eq('is_read', false);
 
       if (updateError) throw updateError;

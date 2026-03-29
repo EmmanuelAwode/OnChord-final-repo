@@ -116,8 +116,8 @@ export default function App() {
     }
   };
 
-  const AUTH_INIT_TIMEOUT_MS = 20000;
-  const PROFILE_INIT_TIMEOUT_MS = 15000;
+  const AUTH_INIT_TIMEOUT_MS = 60000; // Increased for Supabase free tier (was 45s)
+  const PROFILE_INIT_TIMEOUT_MS = 45000; // Increased for slow network (was 30s)
 
   const isTimeoutError = (error: unknown) =>
     error instanceof Error && error.message.toLowerCase().includes("timed out");

@@ -1,0 +1,37 @@
+{
+  "created_at_utc": "2026-03-23",
+  "source_files": {
+    "sample_tracks": "models/evaluation/taste_eval_sample_tracks.csv",
+    "pair_predictions": "models/evaluation/taste_pair_predictions.csv",
+    "metadata": "models/taste_model_metadata.json"
+  },
+  "test_data": {
+    "sample_tracks": 20000,
+    "pair_predictions": 2000,
+    "feature_columns": [
+      "danceability",
+      "energy",
+      "valence",
+      "acousticness",
+      "instrumentalness",
+      "liveness",
+      "speechiness",
+      "tempo"
+    ]
+  },
+  "metrics_recomputed": {
+    "mae": 5.890705776388617,
+    "rmse": 8.370799265073787,
+    "median_abs_error": 3.923637260341497,
+    "p90_abs_error": 13.793804264884512,
+    "pearson_r": 0.9303987296302196,
+    "spearman_rho": 0.9303117315779329
+  },
+  "model": {
+    "algorithm": "TruncatedSVD + cosine similarity",
+    "n_components": 5,
+    "explained_variance": 0.8333579858111522,
+    "tracks_trained": 1204025,
+    "feature_count": 8
+  }
+}

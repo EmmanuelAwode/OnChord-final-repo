@@ -1,6 +1,7 @@
 // Real-time activity feed hook using Supabase Realtime
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
+import { useSupabaseFollows } from './useSupabaseFollows';
 import { fixSpotifyImageUrl } from '../components/ui/utils';
 import { formatDateForDisplay } from './localeFormatting';
 
@@ -26,17 +27,20 @@ export function useRealtimeActivity() {
   const [liveListeners, setLiveListeners] = useState<Map<string, Activity>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const { following } = useSupabaseFollows();
 
-  // Load initial activities
+  // Load initial activities whenever following list changes
   useEffect(() => {
-    loadActivities();
-  }, []);
+    if (following.size > 0) {
+      loadActivities();
+    }
+  }, [following]);
 
   // Subscribe to real-time activity updates
   useEffect(() => {
     const userId = localStorage.getItem('userId') || 'user-1';
     
-    // Subscribe to new activities from friends
+    // Subscribe to new activities from followed users
     const activityChannel = supabase
       .channel('friend_activities')
       .on(
@@ -47,8 +51,11 @@ export function useRealtimeActivity() {
           table: 'activities',
         },
         (payload) => {
-          const newActivity = transformActivity(payload.new);
-          setActivities((prev) => [newActivity, ...prev.slice(0, 99)]);
+          // Only add activities from users in following list
+          if (following.has(payload.new.user_id)) {
+            const newActivity = transformActivity(payload.new);
+            setActivities((prev) => [newActivity, ...prev.slice(0, 99)]);
+          }
         }
       )
       .subscribe();
@@ -82,7 +89,7 @@ export function useRealtimeActivity() {
       supabase.removeChannel(activityChannel);
       supabase.removeChannel(presenceChannel);
     };
-  }, []);
+  }, [following]);
 
   // Broadcast current listening status
   async function broadcastListening(track: {
@@ -113,12 +120,21 @@ export function useRealtimeActivity() {
   async function loadActivities() {
     try {
       setIsLoading(true);
-      const userId = localStorage.getItem('userId') || 'user-1';
       
-      // Get friend IDs (in production, this would come from a friends table)
+      // Only load activities if user is following someone
+      if (following.size === 0) {
+        setActivities([]);
+        setError(null);
+        return;
+      }
+
+      const followingIds = Array.from(following);
+      
+      // Get activities only from followed users
       const { data, error: fetchError } = await supabase
         .from('activities')
         .select('*')
+        .in('user_id', followingIds)
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -161,20 +177,23 @@ export function useRealtimeActivity() {
       const presences = presenceState[key];
       if (presences && presences.length > 0) {
         const latest = presences[0];
-        listeners.set(key, {
-          id: `live-${key}`,
-          userId: latest.user_id,
-          userName: latest.user_name,
-          userAvatar: latest.user_avatar,
-          type: 'listening',
-          action: `is listening to ${latest.track_title}`,
-          trackTitle: latest.track_title,
-          albumArtist: latest.track_artist,
-          albumCover: fixSpotifyImageUrl(latest.album_cover),
-          timestamp: 'Now',
-          createdAt: latest.timestamp,
-          isLive: true,
-        });
+        // Only add listeners from followed users
+        if (following.has(latest.user_id)) {
+          listeners.set(key, {
+            id: `live-${key}`,
+            userId: latest.user_id,
+            userName: latest.user_name,
+            userAvatar: latest.user_avatar,
+            type: 'listening',
+            action: `is listening to ${latest.track_title}`,
+            trackTitle: latest.track_title,
+            albumArtist: latest.track_artist,
+            albumCover: fixSpotifyImageUrl(latest.album_cover),
+            timestamp: 'Now',
+            createdAt: latest.timestamp,
+            isLive: true,
+          });
+        }
       }
     });
     

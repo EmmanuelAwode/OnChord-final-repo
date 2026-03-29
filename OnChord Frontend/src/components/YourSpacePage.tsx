@@ -60,10 +60,16 @@ export function YourSpacePage({
   const [loadingConnections, setLoadingConnections] = useState(true);
   
   // Use real profile data if available, otherwise fall back to defaults
-  const displayName = profile?.display_name || "Music Lover";
-  const displayUsername = profile?.username ? `@${profile.username}` : "@user";
-  const displayBio = profile?.bio || "No bio yet";
+  const displayName = profile?.display_name && profile.display_name.trim() ? profile.display_name : "Music Lover";
+  const displayUsername = profile?.username && profile.username.trim() ? `@${profile.username}` : "@user";
+  const displayBio = profile?.bio && profile.bio.trim() ? profile.bio : "No bio yet";
   const displayAvatar = profile?.avatar_url;
+  
+  // Add to list state
+  const { getListAlbums, createList, userListsMetadata, updateList, deleteList } = useLists();
+  
+  // Compute userListsArray from metadata for stats display
+  const userListsArray = useMemo(() => Object.values(userListsMetadata || {}), [userListsMetadata]);
   
   // Collaborative playlists state (empty until real collab playlist system is implemented)
   const [collaborativePlaylists, setCollaborativePlaylists] = useState<any[]>([]);
@@ -87,7 +93,6 @@ export function YourSpacePage({
   }, [topArtists]);
 
   // Add to list state
-  const { getListAlbums, createList, userListsMetadata, updateList, deleteList } = useLists();
   const [addToListOpen, setAddToListOpen] = useState(false);
   const [selectedList, setSelectedList] = useState<{id: string; title: string} | null>(null);
 
@@ -126,32 +131,42 @@ export function YourSpacePage({
       
       try {
         const [followers, following, followerIds, followingIds] = await Promise.all([
-          getFollowerCount(session.session.user.id),
-          getFollowingCount(session.session.user.id),
-          getFollowers(),
-          getFollowing(),
+          getFollowerCount(session.session.user.id).catch(() => 0),
+          getFollowingCount(session.session.user.id).catch(() => 0),
+          getFollowers().catch(() => []),
+          getFollowing().catch(() => []),
         ]);
 
         setFollowersCount(followers);
         setFollowingCount(following);
 
         // Load profiles for followers and following
-        const [followerProfilesData, followingProfilesData] = await Promise.all([
-          getProfiles(followerIds),
-          getProfiles(followingIds),
-        ]);
+        if (followerIds?.length > 0 || followingIds?.length > 0) {
+          try {
+            const [followerProfilesData, followingProfilesData] = await Promise.all([
+              followerIds?.length > 0 ? getProfiles(followerIds) : Promise.resolve([]),
+              followingIds?.length > 0 ? getProfiles(followingIds) : Promise.resolve([]),
+            ]);
 
-        setFollowerProfiles(followerProfilesData);
-        setFollowingProfiles(followingProfilesData);
+            setFollowerProfiles(followerProfilesData || []);
+            setFollowingProfiles(followingProfilesData || []);
+          } catch (profileError) {
+            console.error('Error loading connection profiles:', profileError);
+          }
+        }
       } catch (error) {
         console.error('Error loading connections:', error);
+        setFollowersCount(0);
+        setFollowingCount(0);
       } finally {
         setLoadingConnections(false);
       }
     }
 
-    loadCounts();
-  }, []);
+    if (profile?.id) {
+      loadCounts();
+    }
+  }, [profile?.id]);
 
   const handleFollowToggle = (userId: string, userName: string) => {
     toggleFollow(userId);
@@ -291,7 +306,7 @@ export function YourSpacePage({
                 key: 'lists-stat',
                 tab: 'lists',
                 icon: ListMusic,
-                value: 18,
+                value: userListsArray.length,
                 label: 'Lists',
                 color: 'secondary'
               },

@@ -59,13 +59,30 @@ VITE_SPOTIFY_REDIRECT_URI=http://localhost:5173/settings?tab=account
 
 #### Supabase Edge Functions
 In your Supabase dashboard:
-1. Go to **Edge Functions** → **Manage secrets**
-2. Add these secrets:
-   ```
-   SPOTIFY_CLIENT_ID=your_client_id_here
-   SPOTIFY_CLIENT_SECRET=your_client_secret_here
-   SPOTIFY_REDIRECT_URI=http://localhost:5173/settings?tab=account
-   ```
+
+1. Go to **Settings** → **Secrets and environment variables**
+2. Click **Add secret**
+3. Add these secrets:
+   - Name: `SPOTIFY_CLIENT_ID`, Value: `your_client_id_here`
+   - Name: `SPOTIFY_CLIENT_SECRET`, Value: `your_client_secret_here`
+4. Click **Save** for each
+
+**Important**: After adding secrets, you MUST redeploy the Edge Functions:
+```bash
+supabase functions deploy spotify-callback
+supabase functions deploy spotify-refresh
+```
+
+Or redeploy through the Supabase Dashboard UI:
+1. Go to **Edge Functions**
+2. Click on `spotify-refresh` function
+3. Click the **Deploy** button or use the kebab menu
+
+**Troubleshooting**: If you see "Token refresh failed: invalid_client" error:
+- ✅ Verify secrets are set in Supabase Dashboard
+- ✅ Verify you copied the correct Client ID and Secret from Spotify
+- ✅ Verify the Edge Functions have been redeployed AFTER setting secrets
+- ✅ Check Edge Function logs for detailed error messages
 
 ### Step 3: Create Database Tables
 

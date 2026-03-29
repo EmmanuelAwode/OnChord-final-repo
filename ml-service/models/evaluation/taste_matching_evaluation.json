@@ -1,0 +1,30 @@
+{
+  "created_at_utc": "2026-03-22T21:29:28.148738+00:00",
+  "dataset": {
+    "csv_path": "C:\\Users\\colli\\Downloads\\OnChord Web App\\OnChord-repo\\ml-service\\data\\tracks_features.csv",
+    "sample_tracks_used": 20000,
+    "embedding_pool_size": 1204025
+  },
+  "metrics": {
+    "pairwise_agreement": {
+      "pearson_r": 0.9466216728232433,
+      "spearman_rho": 0.9471850858449431,
+      "mae": 5.5131671718584565,
+      "rmse": 7.93401786284017,
+      "n_user_pairs": 51040
+    },
+    "neighbor_preservation": {
+      "recall_at_k": 0.45899999999999996,
+      "std": 0.21311733857197074,
+      "k": 10,
+      "anchors": 200
+    },
+    "model_info": {
+      "algorithm": "TruncatedSVD + cosine similarity",
+      "n_components": 5,
+      "explained_variance": 0.8333579858111522,
+      "feature_count": 8,
+      "tracks_trained": 1204025
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Avatar } from "./ui/avatar";
@@ -7,6 +7,7 @@ import { Heart, MessageCircle, UserPlus, ListMusic, Calendar, Bell, Check, X } f
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { EmptyState } from "./EmptyState";
 import { Badge } from "./ui/badge";
+import { useRealtimeNotifications } from "../lib/useRealtimeNotifications";
 
 // Notifications will be implemented via Supabase real-time subscriptions in future
 // For now, use empty array
@@ -19,7 +20,7 @@ interface NotificationsModalProps {
 }
 
 export function NotificationsModal({ isOpen, onClose, onNavigate }: NotificationsModalProps) {
-  const [allNotifications, setAllNotifications] = useState(placeholderNotifications);
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useRealtimeNotifications();
   const [filter, setFilter] = useState("all");
 
   const getIcon = (type: string) => {
@@ -30,44 +31,34 @@ export function NotificationsModal({ isOpen, onClose, onNavigate }: Notification
         return <MessageCircle className="w-5 h-5 text-primary" />;
       case "follow":
         return <UserPlus className="w-5 h-5 text-secondary" />;
-      case "playlist":
+      case "playlist_invite":
         return <ListMusic className="w-5 h-5 text-accent" />;
-      case "event":
-        return <Calendar className="w-5 h-5 text-primary" />;
+      case "mention":
+        return <MessageCircle className="w-5 h-5 text-primary" />;
+      case "review_reply":
+        return <Heart className="w-5 h-5 text-accent" />;
       default:
         return <Bell className="w-5 h-5 text-muted-foreground" />;
     }
   };
 
-  const markAllAsRead = () => {
-    setAllNotifications(
-      allNotifications.map((notif) => ({ ...notif, read: true }))
-    );
-  };
-
-  const handleNotificationClick = (notification: typeof placeholderNotifications[0]) => {
+  const handleNotificationClick = (notification: any) => {
     // Mark as read
-    setAllNotifications(
-      allNotifications.map((n) => 
-        n.id === notification.id ? { ...n, read: true } : n
-      )
-    );
+    markAsRead(notification.id);
 
     // Navigate based on notification type
     onClose(); // Close modal first
     switch (notification.type) {
       case "like":
       case "comment":
+      case "review_reply":
         onNavigate?.("your-space");
         break;
       case "follow":
         onNavigate?.("feed");
         break;
-      case "playlist":
+      case "playlist_invite":
         onNavigate?.("your-space");
-        break;
-      case "event":
-        onNavigate?.("events");
         break;
       default:
         break;
@@ -75,10 +66,8 @@ export function NotificationsModal({ isOpen, onClose, onNavigate }: Notification
   };
 
   const filteredNotifications = filter === "unread" 
-    ? allNotifications.filter(n => !n.read)
-    : allNotifications;
-
-  const unreadCount = allNotifications.filter(n => !n.read).length;
+    ? notifications.filter(n => !n.isRead)
+    : notifications;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -118,7 +107,7 @@ export function NotificationsModal({ isOpen, onClose, onNavigate }: Notification
                 value="all"
                 className="flex-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
               >
-                All {allNotifications.length > 0 && `(${allNotifications.length})`}
+                All {notifications.length > 0 && `(${notifications.length})`}
               </TabsTrigger>
               <TabsTrigger
                 value="unread"
@@ -136,14 +125,14 @@ export function NotificationsModal({ isOpen, onClose, onNavigate }: Notification
                       key={notification.id}
                       onClick={() => handleNotificationClick(notification)}
                       className={`p-4 bg-card border-border hover:border-primary transition-all cursor-pointer group ${
-                        !notification.read ? 'bg-primary/5 border-primary/30' : ''
+                        !notification.isRead ? 'bg-primary/5 border-primary/30' : ''
                       }`}
                     >
                       <div className="flex gap-4">
                         <Avatar className="w-12 h-12 flex-shrink-0 ring-2 ring-transparent group-hover:ring-primary transition">
                           <img 
-                            src={notification.userAvatar} 
-                            alt={notification.userName}
+                            src={notification.actionUserAvatar || '/avatar-placeholder.png'} 
+                            alt={notification.actionUserName || 'User'}
                             className="object-cover"
                           />
                         </Avatar>
@@ -154,14 +143,14 @@ export function NotificationsModal({ isOpen, onClose, onNavigate }: Notification
                             </div>
                             <div className="flex-1">
                               <p className="text-sm text-foreground group-hover:text-primary transition">
-                                <span className="font-medium">{notification.userName}</span>{" "}
-                                {notification.content}
+                                <span className="font-medium">{notification.actionUserName || 'User'}</span>{" "}
+                                {notification.message}
                               </p>
                               <p className="text-xs text-muted-foreground mt-1">
                                 {notification.timestamp}
                               </p>
                             </div>
-                            {!notification.read && (
+                            {!notification.isRead && (
                               <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-2" />
                             )}
                           </div>
@@ -191,6 +180,6 @@ export function NotificationsModal({ isOpen, onClose, onNavigate }: Notification
 
 // Export unread count hook for use in Navigation
 export function useUnreadNotifications() {
-  // Notifications will come from Supabase in future - return 0 for now
-  return 0;
+  const { unreadCount } = useRealtimeNotifications();
+  return unreadCount;
 }
