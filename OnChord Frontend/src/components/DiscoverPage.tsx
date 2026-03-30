@@ -100,7 +100,7 @@ function SpotifyTrackCard({
         >
           <img
             src={albumCover}
-            alt={track.album.name}
+            alt={track?.album?.name || "Album"}
             className="w-16 h-16 rounded-lg object-cover shadow-md group-hover:shadow-xl transition-shadow"
             onError={handleImageError}
           />
@@ -120,7 +120,7 @@ function SpotifyTrackCard({
             {track.name}
           </h3>
           <p className="text-xs text-muted-foreground truncate mb-1">
-            {track.artists.map((a) => a.name).join(", ")}
+            {track?.artists?.filter(a => a)?.map((a) => a?.name).join(", ") || "Unknown"}
           </p>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock className="w-3 h-3" />
@@ -226,7 +226,7 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
     setDiscoveryLoading(true);
 
     const topTrackIds = new Set(topTracks.map((t) => t.id));
-    const artistNames = topArtists.slice(0, 5).map((a) => a.name);
+    const artistNames = topArtists.slice(0, 5).filter(a => a).map((a) => a.name);
 
     Promise.all(
       artistNames.map((name) =>
@@ -514,15 +514,15 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
             </div>
           ) : (
             <div className="flex gap-4 overflow-x-auto pb-4" style={{ scrollbarWidth: "thin" }}>
-              {topArtists.slice(0, 12).map((artist, index) => (
+              {topArtists.slice(0, 12).filter(a => a).map((artist, index) => (
                 <div
-                  key={artist.id}
+                  key={artist?.id}
                   className="flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer group"
                 >
                   <div className="relative">
                     <img
                       src={artist?.images?.[0]?.url || artist?.images?.[1]?.url || ""}
-                      alt={artist.name}
+                      alt={artist?.name || "Artist"}
                       className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover shadow-md group-hover:shadow-xl transition-all group-hover:scale-105 ring-2 ring-transparent group-hover:ring-primary/50"
                       onError={handleImageError}
                     />
@@ -531,7 +531,7 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
                     </Badge>
                   </div>
                   <span className="text-xs text-foreground font-medium text-center truncate w-20 md:w-24 group-hover:text-primary transition-colors">
-                    {artist.name}
+                    {artist?.name || "Unknown"}
                   </span>
                 </div>
               ))}
