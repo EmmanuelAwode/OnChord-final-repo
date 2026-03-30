@@ -81,7 +81,7 @@ function SpotifyTrackCard({
   onTrackClick?: (track: SpotifyTrackItem) => void;
 }) {
   const albumCover =
-    track.album.images[0]?.url || track.album.images[1]?.url || "";
+    track?.album?.images?.[0]?.url || track?.album?.images?.[1]?.url || "";
 
   return (
     <Card
@@ -269,12 +269,12 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
 
   const handleFavourite = (track: SpotifyTrackItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    const albumCover = track.album.images[0]?.url || "";
+    const albumCover = track?.album?.images?.[0]?.url || "";
     const added = toggleSong({
       id: track.id,
       title: track.name,
-      artist: track.artists.map((a) => a.name).join(", "),
-      albumId: track.album.id,
+      artist: track?.artists?.map((a) => a.name).join(", ") || "Unknown",
+      albumId: track?.album?.id || "",
       albumCover,
       duration: formatDuration(track.duration_ms),
     });
@@ -291,8 +291,8 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
       "song",
       track.id,
       track.name,
-      track.artists.map((a) => a.name).join(", "),
-      track.album.images[0]?.url || ""
+      track?.artists?.map((a) => a.name).join(", ") || "Unknown",
+      track?.album?.images?.[0]?.url || ""
     );
   };
 
@@ -521,7 +521,7 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
                 >
                   <div className="relative">
                     <img
-                      src={artist.images[0]?.url || artist.images[1]?.url || ""}
+                      src={artist?.images?.[0]?.url || artist?.images?.[1]?.url || ""}
                       alt={artist.name}
                       className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover shadow-md group-hover:shadow-xl transition-all group-hover:scale-105 ring-2 ring-transparent group-hover:ring-primary/50"
                       onError={handleImageError}
