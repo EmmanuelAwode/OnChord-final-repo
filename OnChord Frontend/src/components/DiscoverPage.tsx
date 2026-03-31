@@ -219,23 +219,32 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
 
   // Discovery: search for tracks by top artists the user might not know
   useEffect(() => {
-    if (!connected || topArtistsLoading || topArtists.length === 0) {
-      if (!topArtistsLoading && connected) setDiscoveryLoading(false);
-      return;
-    }
+    if (!connected) return;
+    
     setDiscoveryLoading(true);
 
-    const topTrackIds = new Set(topTracks.map((t) => t.id));
-    const artistNames = topArtists.slice(0, 5).filter(a => a).map((a) => a.name);
+    // Start fetching immediately with whatever artists we have, even if still loading
+    const fetchDiscovery = async () => {
+      try {
+        // Use top 5 artists if available, otherwise fetch will return empty results gracefully
+        const artistNames = topArtists.slice(0, 5).filter(a => a).map((a) => a.name);
+        
+        // If no artists yet, show loading but don't fail
+        if (artistNames.length === 0) {
+          setDiscoveryTracks([]);
+          return;
+        }
 
-    Promise.all(
-      artistNames.map((name) =>
-        spotifySearch(`artist:"${name}"`, "track", 10)
-          .then((data) => (data.tracks?.items || []) as SpotifyTrackItem[])
-          .catch(() => [] as SpotifyTrackItem[])
-      )
-    )
-      .then((results) => {
+        const topTrackIds = new Set(topTracks.map((t) => t.id));
+        
+        const results = await Promise.all(
+          artistNames.map((name) =>
+            spotifySearch(`artist:"${name}"`, "track", 10)
+              .then((data) => (data.tracks?.items || []) as SpotifyTrackItem[])
+              .catch(() => [] as SpotifyTrackItem[])
+          )
+        );
+
         const allTracks = results.flat();
         // Remove duplicates and tracks the user already listens to
         const seen = new Set<string>();
@@ -250,10 +259,15 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
           [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
         }
         setDiscoveryTracks(filtered.slice(0, 18));
-      })
-      .catch(() => setDiscoveryTracks([]))
-      .finally(() => setDiscoveryLoading(false));
-  }, [connected, topArtists, topArtistsLoading, topTracks]);
+      } catch {
+        setDiscoveryTracks([]);
+      } finally {
+        setDiscoveryLoading(false);
+      }
+    };
+
+    fetchDiscovery();
+  }, [connected, topArtists, topTracks]);
 
   // Genre search
   useEffect(() => {

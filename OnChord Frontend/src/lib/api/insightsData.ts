@@ -143,11 +143,11 @@ export async function getListeningStats(): Promise<{
       };
     }
 
-    // Fetch data in parallel
+    // Fetch data in parallel (reduced to 30 each to improve load time)
     const [topArtistsResult, topTracksResult, recentResult] = await Promise.allSettled([
-      getUserTopArtists("medium_term", 50),
-      getUserTopTracks("medium_term", 50),
-      getRecentlyPlayed(50),
+      getUserTopArtists("medium_term", 30),
+      getUserTopTracks("medium_term", 30),
+      getRecentlyPlayed(30),
     ]);
 
     const topArtists = topArtistsResult.status === "fulfilled" ? topArtistsResult.value : null;

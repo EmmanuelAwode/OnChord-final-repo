@@ -62,16 +62,18 @@ export async function isFollowing(userId: string): Promise<boolean> {
 }
 
 /**
- * Get list of users that current user follows
+ * Get list of users that current user follows with pagination
  */
-export async function getFollowing(): Promise<string[]> {
+export async function getFollowing(limit = 20, offset = 0): Promise<string[]> {
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) return [];
 
   const { data, error } = await supabase
     .from("follows")
     .select("following_id")
-    .eq("follower_id", session.session.user.id);
+    .eq("follower_id", session.session.user.id)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (error) {
     console.error("Error fetching following:", error);
@@ -82,16 +84,18 @@ export async function getFollowing(): Promise<string[]> {
 }
 
 /**
- * Get list of users following the current user
+ * Get list of users following the current user with pagination
  */
-export async function getFollowers(): Promise<string[]> {
+export async function getFollowers(limit = 20, offset = 0): Promise<string[]> {
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) return [];
 
   const { data, error } = await supabase
     .from("follows")
     .select("follower_id")
-    .eq("following_id", session.session.user.id);
+    .eq("following_id", session.session.user.id)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (error) {
     console.error("Error fetching followers:", error);

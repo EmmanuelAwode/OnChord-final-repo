@@ -40,6 +40,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
   const [isComputingAll, setIsComputingAll] = useState(false);
   const [loadingMyData, setLoadingMyData] = useState(false);
   const [blockedState, setBlockedState] = useState<Record<string, boolean>>({});
+  const [hasComputedMatches, setHasComputedMatches] = useState(false);
   
   // Load current user ID and their music data
   useEffect(() => {
@@ -201,6 +202,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
     
     setUserCompatibilities(newCompatibilities);
     setIsComputingAll(false);
+    setHasComputedMatches(true);
     
     const matchCount = Object.values(newCompatibilities).filter(c => c.similarity > 0).length;
     if (mlServiceAvailable) {
@@ -348,6 +350,12 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
           <span className="ml-3 text-muted-foreground">Loading users...</span>
         </div>
+      ) : !hasComputedMatches ? (
+        <Card className="p-8 text-center">
+          <Sparkles className="w-12 h-12 mx-auto mb-4 text-primary" />
+          <p className="text-foreground font-medium mb-2">Ready to find your taste matches?</p>
+          <p className="text-muted-foreground">Click the "Find Matches" button above to discover people with similar music taste!</p>
+        </Card>
       ) : filteredUsers.length === 0 ? (
         <Card className="p-8 text-center">
           <Users className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
@@ -358,7 +366,12 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
         </Card>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredUsers.map((user) => {
+          {filteredUsers
+            .filter(user => {
+              const compat = getCompatibility(user.id);
+              return compat && compat.similarity > 0;
+            })
+            .map((user) => {
             const compat = getCompatibility(user.id);
             const isComputed = compat !== null;
             const displayCompat = compat?.similarity ?? 0;
@@ -374,24 +387,13 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
                   <div
                     className="w-24 h-24 rounded-full mx-auto mb-3 flex items-center justify-center"
                     style={{
-                      background: isComputed 
-                        ? `conic-gradient(#A78BFA ${displayCompat * 3.6}deg, #3B4252 0deg)`
-                        : `conic-gradient(#6B7280 180deg, #3B4252 0deg)`,
+                      background: `conic-gradient(#A78BFA ${displayCompat * 3.6}deg, #3B4252 0deg)`,
                     }}
                   >
                     <div className="w-20 h-20 rounded-full bg-card flex items-center justify-center">
                       <div>
-                        {isComputed ? (
-                          <>
-                            <p className="text-2xl text-primary">{displayCompat}%</p>
-                            <p className="text-xs text-muted-foreground">Match</p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-lg text-muted-foreground">?</p>
-                            <p className="text-xs text-muted-foreground">Click Find</p>
-                          </>
-                        )}
+                        <p className="text-2xl text-primary">{displayCompat}%</p>
+                        <p className="text-xs text-muted-foreground">Match</p>
                       </div>
                     </div>
                   </div>
@@ -420,7 +422,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
                 </div>
 
                 {/* Shared Artists */}
-                {isComputed && sharedArtists.length > 0 && (
+                {sharedArtists.length > 0 && (
                   <div className="mb-4">
                     <p className="text-sm text-muted-foreground mb-2">Shared Artists</p>
                     <div className="flex flex-wrap gap-2">
@@ -443,7 +445,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
                 )}
 
                 {/* Match Details */}
-                {isComputed && compat && (
+                {compat && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
                     <Sparkles className="w-4 h-4" />
                     <span>

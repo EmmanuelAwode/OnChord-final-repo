@@ -94,9 +94,9 @@ function getRelativeTime(date: Date): string {
 }
 
 /**
- * Get current user's reviews
+ * Get current user's reviews with pagination (default: first 25 reviews)
  */
-export async function getReviews(): Promise<Review[]> {
+export async function getReviews(limit = 25, offset = 0): Promise<Review[]> {
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) return [];
 
@@ -104,7 +104,8 @@ export async function getReviews(): Promise<Review[]> {
     .from("reviews")
     .select("*")
     .eq("uid", session.session.user.id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (error) throw error;
   return (data as DbReview[]).map(mapDbToUi);
@@ -126,17 +127,20 @@ export async function getPublicReviews(limit = 50): Promise<Review[]> {
 }
 
 /**
- * Get public reviews from users the current user follows
+ * Get public reviews from users the current user follows (limited to 20 recent reviews)
+ * Only fetches from first 50 followed users to avoid large IN clauses
  */
-export async function getFriendsReviews(): Promise<Review[]> {
+export async function getFriendsReviews(limit = 20, offset = 0): Promise<Review[]> {
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) return [];
 
-  // Get followed user IDs
+  // Get followed user IDs (capped at 50 to avoid overly large IN clauses)
   const { data: follows } = await supabase
     .from("follows")
     .select("following_id")
-    .eq("follower_id", session.session.user.id);
+    .eq("follower_id", session.session.user.id)
+    .order("created_at", { ascending: false })
+    .limit(50);
 
   const followedIds = follows?.map(f => f.following_id) || [];
   if (followedIds.length === 0) return [];
@@ -147,7 +151,7 @@ export async function getFriendsReviews(): Promise<Review[]> {
     .in("uid", followedIds)
     .eq("visibility", "public")
     .order("created_at", { ascending: false })
-    .limit(50);
+    .range(offset, offset + limit - 1);
 
   if (error) throw error;
   return (data as DbReview[]).map(mapDbToUi);

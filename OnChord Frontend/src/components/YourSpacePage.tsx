@@ -130,17 +130,20 @@ export function YourSpacePage({
       setLoadingConnections(true);
       
       try {
-        const [followers, following, followerIds, followingIds] = await Promise.all([
+        const [followers, following] = await Promise.all([
           getFollowerCount(session.session.user.id).catch(() => 0),
           getFollowingCount(session.session.user.id).catch(() => 0),
-          getFollowers().catch(() => []),
-          getFollowing().catch(() => []),
         ]);
 
         setFollowersCount(followers);
         setFollowingCount(following);
 
-        // Load profiles for followers and following
+        // Load first batch of profiles (12 each) - lazy load the rest
+        const [followerIds, followingIds] = await Promise.all([
+          getFollowers(12, 0).catch(() => []),  // Load first 12 only
+          getFollowing(12, 0).catch(() => []),  // Load first 12 only
+        ]);
+
         if (followerIds?.length > 0 || followingIds?.length > 0) {
           try {
             const [followerProfilesData, followingProfilesData] = await Promise.all([
