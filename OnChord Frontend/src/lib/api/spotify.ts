@@ -232,6 +232,10 @@ export async function handleSpotifyCallback(code: string) {
 /**
  * Refreshes the Spotify access token using the Supabase Edge Function.
  * The edge function securely handles the refresh with client_secret.
+ * 
+ * RACE CONDITION PROTECTION: Sets refreshBlockedUntil BEFORE making the request
+ * so concurrent requests will see it's blocked and fail fast instead of all
+ * attempting the refresh simultaneously.
  */
 async function refreshAccessToken(refreshToken: string): Promise<string> {
   if (!refreshToken) {
@@ -246,23 +250,29 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
     throw new Error("Not authenticated");
   }
 
-  // Call the Supabase Edge Function which handles token refresh securely
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const response = await fetch(`${supabaseUrl}/functions/v1/spotify-refresh`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${sessionData.session.access_token}`,
-      "Content-Type": "application/json",
-    },
-  });
+  // OPTIMISTIC BLOCKING: Set block BEFORE making the request
+  // This prevents concurrent requests from all hitting Spotify refresh simultaneously
+  const originalBlockTime = refreshBlockedUntil;
+  refreshBlockedUntil = Date.now() + 1000; // 1 second block for concurrent requests
+  
+  try {
+    // Call the Supabase Edge Function which handles token refresh securely
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const response = await fetch(`${supabaseUrl}/functions/v1/spotify-refresh`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${sessionData.session.access_token}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-  if (!response.ok) {
-    // Token refresh failed — user needs to re-authorize
-    cachedAccessToken = null;
-    cachedTokenExpiry = 0;
-    refreshBlockedUntil = Date.now() + 5 * 60 * 1000;
-    const errorText = await response.text();
-    console.error("Token refresh failed:", errorText);
+    if (!response.ok) {
+      // Token refresh failed — user needs to re-authorize
+      cachedAccessToken = null;
+      cachedTokenExpiry = 0;
+      refreshBlockedUntil = Date.now() + 5 * 60 * 1000;
+      const errorText = await response.text();
+      console.error("Token refresh failed:", errorText);
     
     // Check if it's a credentials configuration issue
     if (errorText.includes('not configured') || errorText.includes('Spotify credentials')) {
@@ -300,8 +310,18 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
   cachedAccessToken = data.access_token;
   const expiresAt = new Date(data.expires_at).getTime();
   cachedTokenExpiry = expiresAt;
+    
+    // Clear the block on success
+    refreshBlockedUntil = 0;
 
-  return data.access_token;
+    return data.access_token;
+  } catch (error) {
+    // Ensure block is set on any error
+    if (refreshBlockedUntil < Date.now() + 5 * 60 * 1000) {
+      refreshBlockedUntil = Date.now() + 5 * 60 * 1000;
+    }
+    throw error;
+  }
 }
 
 /**

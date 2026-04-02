@@ -127,7 +127,7 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
   const [isLoadingPersonalized, setIsLoadingPersonalized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [activeTab, setActiveTab] = useState("for-you");
+  const [activeTab, setActiveTab] = useState("discover");
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(0);
@@ -581,72 +581,18 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
         </div>
       )}
 
-      {/* Tabs for For You / Discover */}
+      {/* Tabs for Discover / For You */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-2 bg-card">
-          <TabsTrigger value="for-you" className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4" />
-            For You
-          </TabsTrigger>
           <TabsTrigger value="discover" className="flex items-center gap-2">
             <Music className="w-4 h-4" />
             Discover
           </TabsTrigger>
+          <TabsTrigger value="for-you" className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4" />
+            For You
+          </TabsTrigger>
         </TabsList>
-
-        {/* For You Tab - Personalized Recommendations */}
-        <TabsContent value="for-you" className="mt-6">
-          {isLoadingPersonalized ? (
-            <div className="flex flex-col items-center justify-center py-16 space-y-4">
-              <Loader2 className="w-12 h-12 animate-spin text-primary" />
-              <p className="text-muted-foreground">Finding concerts based on your favorites...</p>
-            </div>
-          ) : personalizedEvents.length > 0 ? (
-            <div className="space-y-4">
-              {favoriteArtists.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-                  <Heart className="w-4 h-4 text-secondary" />
-                  <span>Based on: {favoriteArtists.slice(0, 5).join(', ')}{favoriteArtists.length > 5 ? ` +${favoriteArtists.length - 5} more` : ''}</span>
-                </div>
-              )}
-              <div className="grid gap-4">
-                {personalizedEvents.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    isPersonalized={true}
-                    onCardClick={() => {
-                      setSelectedEvent(event);
-                      setEventModalOpen(true);
-                    }}
-                    onSetReminder={() => {
-                      setReminderEventData(event);
-                      setReminderDialogOpen(true);
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : (
-            <EmptyState
-              icon={Heart}
-              title="No Personalized Recommendations Yet"
-              description={
-                favoriteArtists.length === 0
-                  ? "Start favoriting artists to see concert recommendations based on your taste!"
-                  : "No upcoming concerts found for your favorite artists. Check back soon!"
-              }
-              action={
-                favoriteArtists.length === 0 ? (
-                  <Button variant="outline" onClick={() => onNavigate?.('discover')}>
-                    <Music className="w-4 h-4 mr-2" />
-                    Discover Artists
-                  </Button>
-                ) : undefined
-              }
-            />
-          )}
-        </TabsContent>
 
         {/* Discover Tab - All Hip-Hop Events */}
         <TabsContent value="discover" className="mt-6">
@@ -706,6 +652,60 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
                 searchQuery
                   ? `No events found for "${searchQuery}". Try different keywords.`
                   : "No upcoming events at the moment. Check back soon!"
+              }
+            />
+          )}
+        </TabsContent>
+
+        {/* For You Tab - Personalized Recommendations */}
+        <TabsContent value="for-you" className="mt-6">
+          {isLoadingPersonalized ? (
+            <div className="flex flex-col items-center justify-center py-16 space-y-4">
+              <Loader2 className="w-12 h-12 animate-spin text-primary" />
+              <p className="text-muted-foreground">Finding concerts based on your favorites...</p>
+            </div>
+          ) : personalizedEvents.length > 0 ? (
+            <div className="space-y-4">
+              {favoriteArtists.length > 0 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+                  <Heart className="w-4 h-4 text-secondary" />
+                  <span>Based on: {favoriteArtists.slice(0, 5).join(', ')}{favoriteArtists.length > 5 ? ` +${favoriteArtists.length - 5} more` : ''}</span>
+                </div>
+              )}
+              <div className="grid gap-4">
+                {personalizedEvents.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    isPersonalized={true}
+                    onCardClick={() => {
+                      setSelectedEvent(event);
+                      setEventModalOpen(true);
+                    }}
+                    onSetReminder={() => {
+                      setReminderEventData(event);
+                      setReminderDialogOpen(true);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <EmptyState
+              icon={Heart}
+              title="No Personalized Recommendations Yet"
+              description={
+                favoriteArtists.length === 0
+                  ? "Start favoriting artists to see concert recommendations based on your taste!"
+                  : "No upcoming concerts found for your favorite artists. Check back soon!"
+              }
+              action={
+                favoriteArtists.length === 0 ? (
+                  <Button variant="outline" onClick={() => onNavigate?.('discover')}>
+                    <Music className="w-4 h-4 mr-2" />
+                    Discover Artists
+                  </Button>
+                ) : undefined
               }
             />
           )}

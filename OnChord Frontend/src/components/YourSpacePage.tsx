@@ -153,6 +153,15 @@ export function YourSpacePage({
 
             setFollowerProfiles(followerProfilesData || []);
             setFollowingProfiles(followingProfilesData || []);
+
+            // SYNC: Initialize the useFollowing hook with actual following profiles
+            // This ensures isFollowing() returns correct state for loaded profiles
+            const followingIds_local = (followingProfilesData || []).map(p => p.id);
+            followingIds_local.forEach(id => {
+              if (!isFollowing(id)) {
+                toggleFollow(id);
+              }
+            });
           } catch (profileError) {
             console.error('Error loading connection profiles:', profileError);
           }
@@ -172,14 +181,25 @@ export function YourSpacePage({
   }, [profile?.id]);
 
   const handleFollowToggle = (userId: string, userName: string) => {
+    const wasFollowing = isFollowing(userId);
     toggleFollow(userId);
-    if (isFollowing(userId)) {
+    
+    if (wasFollowing) {
+      // Was following, now unfollowing
       toast.success(`Unfollowed ${userName}`);
-      // Update local state
       setFollowingProfiles(prev => prev.filter(p => p.id !== userId));
-      setFollowingCount(prev => prev - 1);
+      setFollowingCount(prev => Math.max(0, prev - 1));
     } else {
+      // Wasn't following, now following
       toast.success(`Following ${userName}`);
+      // Add to following profiles if not already there
+      setFollowingProfiles(prev => {
+        const exists = prev.some(p => p.id === userId);
+        if (exists) return prev;
+        // Try to find the profile in followers list to add
+        const profile = followerProfiles.find(p => p.id === userId);
+        return profile ? [...prev, profile] : prev;
+      });
       setFollowingCount(prev => prev + 1);
     }
   };

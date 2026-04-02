@@ -3,9 +3,10 @@ import { Separator } from "./ui/separator";
 
 interface FooterProps {
   onNavigate?: (page: string) => void;
+  isAuthReady?: boolean;
 }
 
-export function Footer({ onNavigate }: FooterProps) {
+export function Footer({ onNavigate, isAuthReady = true }: FooterProps) {
   const currentYear = new Date().getFullYear();
 
   return (
@@ -22,25 +23,29 @@ export function Footer({ onNavigate }: FooterProps) {
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
             <button 
               onClick={() => onNavigate?.("about")}
-              className="hover:text-primary transition"
+              disabled={!isAuthReady}
+              className="hover:text-primary transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
             >
               About
             </button>
             <button 
               onClick={() => onNavigate?.("privacy")}
-              className="hover:text-primary transition"
+              disabled={!isAuthReady}
+              className="hover:text-primary transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
             >
               Privacy
             </button>
             <button 
               onClick={() => onNavigate?.("terms")}
-              className="hover:text-primary transition"
+              disabled={!isAuthReady}
+              className="hover:text-primary transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
             >
               Terms
             </button>
             <button 
               onClick={() => onNavigate?.("help")}
-              className="hover:text-primary transition"
+              disabled={!isAuthReady}
+              className="hover:text-primary transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
             >
               Help
             </button>

@@ -73,6 +73,22 @@ export default function App() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | undefined>(undefined);
   const [editingReview, setEditingReview] = useState<any>(null);
 
+  // ============================================================================
+  // LOADING STATE MANAGEMENT
+  // ============================================================================
+  // isAuthReady: Single source of truth for whether the app is ready for user interaction
+  // - Set to true only AFTER session check completes (10s timeout)
+  // - ALL navigation/interactive elements are DISABLED until this is true
+  // - Prevents click handlers from firing during auth initialization
+  // - Background profile sync continues after isAuthReady is true
+  //
+  // Protection layers:
+  // 1. Navigation component: clicks disabled during loading
+  // 2. Footer component: navigation links disabled during loading  
+  // 3. Quick action button: actions prevented during loading
+  // 4. Navigation handler: early return if !isAuthReady
+  // 5. Quick action handler: early return if !isAuthReady
+  // ============================================================================
   const [session, setSession] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [authInitError, setAuthInitError] = useState<string | null>(null);
@@ -116,7 +132,7 @@ export default function App() {
     }
   };
 
-  const AUTH_INIT_TIMEOUT_MS = 60000; // Increased for Supabase free tier (was 45s)
+  const AUTH_INIT_TIMEOUT_MS = 10000; // Reduced from 60s - session check only
   const PROFILE_INIT_TIMEOUT_MS = 45000; // Increased for slow network (was 30s)
 
   const isTimeoutError = (error: unknown) =>
@@ -202,6 +218,49 @@ export default function App() {
     setNeedsOnboarding(false);
   };
 
+  // Non-blocking background profile sync (doesn't delay app load)
+  const syncProfileInBackground = async (u: any | null) => {
+    if (!u) {
+      setNeedsOnboarding(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("username, accent_color, email, onboarding_completed")
+        .eq("id", u.id)
+        .maybeSingle()
+        .abortSignal();
+
+      if (error) {
+        console.error("background profile fetch error:", error);
+        setNeedsOnboarding(true);
+        return;
+      }
+
+      if (!data) {
+        setNeedsOnboarding(true);
+        return;
+      }
+
+      if (!data.onboarding_completed) {
+        setNeedsOnboarding(true);
+        return;
+      }
+
+      const email = u.email ?? data.email ?? "";
+      const username = (data.username ?? "").trim();
+      const accent = (data.accent_color ?? "").trim();
+
+      setUserData({ username: username || "User", email });
+      if (accent) setAccentColor(accent);
+      setNeedsOnboarding(false);
+    } catch (error) {
+      console.error("background sync error:", error);
+    }
+  };
+
 
   useEffect(() => {
     let mounted = true;
@@ -219,6 +278,23 @@ export default function App() {
     }, AUTH_INIT_TIMEOUT_MS + 10000);
 
     const init = async () => {
+      // ===== CRITICAL: Auth Initialization with Click Protection =====
+      // 1. Check session (getSessionWithRetry) -> 10s timeout
+      // 2. Set isAuthReady=true IMMEDIATELY to unlock UI (prevents blocked user experience)
+      // 3. Fetch profile data in background (non-blocking, up to 45s)
+      //
+      // WHY THIS ORDER:
+      // - Users see app UI within 1-2s instead of 20s
+      // - Navigation/clicks are still blocked via isAuthReady guard
+      // - Profile data loads asynchronously without blocking login flow
+      //
+      // PROTECTION MECHANISMS:
+      // - Navigation handlers check "if (!isAuthReady) return" early
+      // - Navigation/Footer buttons have "disabled={!isAuthReady}"
+      // - Quick action button checks isAuthReady before navigating
+      // - No navigation state changes occur until isAuthReady=true
+      // ================================================================
+      
       try {
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
@@ -240,8 +316,10 @@ export default function App() {
           const { data } = await getSessionWithRetry();
           if (!mounted) return;
           setSession(data.session);
-          await syncProfileAndRoute(data.session?.user ?? null);
+          // Fetch profile in background (non-blocking)
+          syncProfileInBackground(data.session?.user ?? null);
           setAuthInitError(null);
+          setIsAuthReady(true);
           navigate("settings");
           return;
         }
@@ -262,8 +340,10 @@ export default function App() {
           window.history.replaceState({}, document.title, "/");
         }
 
-        await syncProfileAndRoute(sess?.user ?? null);
+        // Load app immediately, fetch profile in background (non-blocking)
         setAuthInitError(null);
+        setIsAuthReady(true);
+        syncProfileInBackground(sess?.user ?? null);
       } catch (e) {
         console.error("init auth error:", e);
         if (mounted) {
@@ -291,15 +371,9 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       if (!mounted) return;
       setSession(newSession);
-      try {
-        await syncProfileAndRoute(newSession?.user ?? null);
-        setAuthInitError(null);
-      } catch (error) {
-        console.error("auth state sync error:", error);
-        if (!isTimeoutError(error)) {
-          setAuthInitError("Couldn't refresh your account state. Please retry.");
-        }
-      }
+      // Fetch profile in background (non-blocking)
+      syncProfileInBackground(newSession?.user ?? null);
+      setAuthInitError(null);
 
       // Auto-link Spotify API connection when user signs in via Spotify OAuth
       if (
@@ -505,6 +579,10 @@ export default function App() {
 
 
   const handleQuickAction = (action: string) => {
+    // PROTECTION: Prevent quick action navigation during auth loading
+    // Quick action buttons should not respond until app is fully initialized
+    if (!isAuthReady) return;
+    
     switch (action) {
       case "review":
         navigate("review");
@@ -884,6 +962,8 @@ const handleSubmitReview = async (reviewData: {
       <Navigation 
         currentPage={currentPage} 
         onNavigate={(page) => {
+          // Prevent navigation during auth initialization
+          if (!isAuthReady) return;
           navigate(page);
           setSidebarOpen(false); // Close sidebar on navigation
         }}
@@ -894,6 +974,7 @@ const handleSubmitReview = async (reviewData: {
         onOpenNotifications={() => setNotificationsModalOpen(true)}
         onOpenReminders={() => setRemindersModalOpen(true)}
         onLogout={handleLogout}
+        isAuthReady={isAuthReady}
       />
       
       {/* Main Content with Page Transitions */}
@@ -949,7 +1030,7 @@ const handleSubmitReview = async (reviewData: {
           </AnimatePresence>
 
           {/* Footer */}
-          <Footer onNavigate={navigate} />
+          <Footer onNavigate={navigate} isAuthReady={isAuthReady} />
         </motion.div>
       </main>
 

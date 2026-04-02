@@ -5,6 +5,13 @@ import { optionalEnv } from "../env";
 const ML_SERVICE_URL = optionalEnv("VITE_ML_SERVICE_URL", "http://localhost:8000");
 const ML_API_TIMEOUT_MS = 12000;
 
+// Cache health check result to avoid constant connection attempts
+let cachedHealthCheck: MlServiceHealth | null = null;
+let healthCheckCacheTime = 0;
+const HEALTH_CHECK_CACHE_MS = 60000; // Cache for 60 seconds
+let mlServiceUnavailable = false;
+let mlServiceUnavailableUntil = 0;
+
 export interface AudioFeatures {
   danceability: number;
   energy: number;
@@ -156,6 +163,11 @@ async function fetchMlJson<T>(
   schema: z.ZodSchema<T>,
   fallbackErrorMessage: string
 ): Promise<T> {
+  // Check if service is marked as unavailable (cooldown period)
+  if (mlServiceUnavailable && Date.now() < mlServiceUnavailableUntil) {
+    throw new Error("ML service is temporarily unavailable");
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ML_API_TIMEOUT_MS);
 
@@ -176,11 +188,32 @@ async function fetchMlJson<T>(
       throw new Error(`Invalid ML response format for ${path}`);
     }
 
+    // Clear unavailable flag on success
+    mlServiceUnavailable = false;
+    mlServiceUnavailableUntil = 0;
+
     return parsed.data;
   } catch (error: any) {
+    // Detect connection-refused or network errors
+    const isNetworkError = 
+      error?.message?.includes("Failed to fetch") ||
+      error?.message?.includes("ERR_CONNECTION_REFUSED") ||
+      error?.name === "TypeError" ||
+      error?.cause?.message?.includes("connection");
+    
+    if (isNetworkError) {
+      // Mark service as unavailable for a bit to avoid hammering it
+      mlServiceUnavailable = true;
+      mlServiceUnavailableUntil = Date.now() + 30000; // 30 second cooldown
+      // Silently fail with a subdued error message
+      console.debug("ML service unavailable - using fallback mode");
+      throw new Error("ML service unavailable");
+    }
+
     if (error?.name === "AbortError") {
       throw new Error("ML service request timed out");
     }
+
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -209,22 +242,31 @@ export async function classifyPlaylistMood(
 
 /**
  * Classify playlist mood from track IDs (uses local database)
+ * Returns null if ML service is unavailable
  */
 export async function classifyMoodByTrackIds(
   trackIds: string[]
-): Promise<MoodClassifyResponse> {
-  return fetchMlJson(
-    '/predict/mood/by-ids',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+): Promise<MoodClassifyResponse | null> {
+  try {
+    return await fetchMlJson(
+      '/predict/mood/by-ids',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ track_ids: trackIds }),
       },
-      body: JSON.stringify({ track_ids: trackIds }),
-    },
-    moodClassifyResponseSchema,
-    'Failed to classify mood'
-  );
+      moodClassifyResponseSchema,
+      'Failed to classify mood'
+    );
+  } catch (error: any) {
+    // ML service unavailable - return null for graceful degradation
+    if (error?.message?.includes("unavailable")) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -267,15 +309,51 @@ export async function getMoodCategories(): Promise<{
 }
 
 /**
- * Health check for ML service
+ * Health check for ML service with caching
+ * Returns cached result if available, otherwise tries to fetch
+ * Returns a default "unavailable" response if service is down
  */
 export async function checkMlServiceHealth(): Promise<MlServiceHealth> {
-  return fetchMlJson(
-    '/health',
-    { method: 'GET' },
-    mlServiceHealthSchema,
-    'ML service is not available'
-  );
+  const now = Date.now();
+  
+  // Return cached result if fresh
+  if (cachedHealthCheck && now - healthCheckCacheTime < HEALTH_CHECK_CACHE_MS) {
+    return cachedHealthCheck;
+  }
+
+  try {
+    const health = await fetchMlJson(
+      '/health',
+      { method: 'GET' },
+      mlServiceHealthSchema,
+      'ML service is not available'
+    );
+    
+    // Cache the result
+    cachedHealthCheck = health;
+    healthCheckCacheTime = now;
+    return health;
+  } catch (error) {
+    // Service unavailable - return default with all features disabled
+    const unavailableHealth: MlServiceHealth = {
+      status: 'unavailable',
+      light_mode: false,
+      taste_model_loaded: false,
+      ml_taste_model_loaded: false,
+      mood_classifier_loaded: false,
+      ml_mood_model_loaded: false,
+      genre_mood_fallback: false,
+      tracks_loaded: 0,
+      inference_mode: 'offline',
+      ml_features_available: false,
+    };
+    
+    // Cache the unavailable response briefly
+    cachedHealthCheck = unavailableHealth;
+    healthCheckCacheTime = now;
+    
+    return unavailableHealth;
+  }
 }
 
 /**

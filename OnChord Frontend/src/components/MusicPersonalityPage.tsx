@@ -113,7 +113,8 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
             
           if (mlMoodAvailable && idsToCheck.length > 0) {
             const moodResult = await classifyMoodByTrackIds(idsToCheck);
-            if (moodResult.average_features) {
+            // moodResult can be null if ML service is unavailable
+            if (moodResult?.average_features) {
               const f = moodResult.average_features;
               setMyMLPersonality({
                 energy: Math.round((f.energy || 0.5) * 100),
@@ -182,18 +183,34 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
                 : musicData.albumIds;
                 
               if (mlMoodAvailable && idsToCheck.length > 0) {
-                const moodResult = await classifyMoodByTrackIds(idsToCheck);
-                if (moodResult.average_features) {
-                  const f = moodResult.average_features;
-                  personality = {
-                    energy: Math.round((f.energy || 0.5) * 100),
-                    danceability: Math.round((f.danceability || 0.5) * 100),
-                    valence: Math.round((f.valence || 0.5) * 100),
-                    acousticness: Math.round((f.acousticness || 0.5) * 100),
-                    instrumentalness: Math.round((f.instrumentalness || 0) * 100),
-                  };
-                  personalityType = computePersonalityType(personality);
+                try {
+                  const moodResult = await classifyMoodByTrackIds(idsToCheck);
+                  // moodResult can be null if ML service is unavailable
+                  if (moodResult?.average_features) {
+                    const f = moodResult.average_features;
+                    personality = {
+                      energy: Math.round((f.energy || 0.5) * 100),
+                      danceability: Math.round((f.danceability || 0.5) * 100),
+                      valence: Math.round((f.valence || 0.5) * 100),
+                      acousticness: Math.round((f.acousticness || 0.5) * 100),
+                      instrumentalness: Math.round((f.instrumentalness || 0) * 100),
+                    };
+                    personalityType = computePersonalityType(personality);
+                  }
+                } catch (mlError) {
+                  // ML classification failed, but user has music data
+                  console.warn('ML personality for friend failed:', mlError);
+                  // Still show some personality to indicate data exists
+                  if (idsToCheck.length > 0) {
+                    personality = DEFAULT_PERSONALITY;
+                    personalityType = "Music Enthusiast";
+                  }
                 }
+              } else if (!mlMoodAvailable && idsToCheck.length > 0) {
+                // ML service not available but user has music data
+                // Show default personality to indicate data exists
+                personality = DEFAULT_PERSONALITY;
+                personalityType = "Music Enthusiast";
               }
 
               return { ...friend, musicData, personality, personalityType, loading: false };
@@ -249,7 +266,8 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
           const moodResult = await classifyMoodByTrackIds(trackIds);
           if (cancelled) return;
 
-          if (moodResult.average_features) {
+          // moodResult can be null if ML service is unavailable
+          if (moodResult?.average_features) {
             const f = moodResult.average_features;
             setSpotifyMlFallbackPersonality({
               energy: Math.round((f.energy || 0.5) * 100),
@@ -763,11 +781,20 @@ export function MusicPersonalityPage({ onNavigate }: MusicPersonalityPageProps) 
                     </RadarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                  <div className="h-[300px] flex flex-col items-center justify-center text-muted-foreground">
                     {selectedFriend.loading ? (
-                      <Loader2 className="w-8 h-8 animate-spin" />
+                      <>
+                        <Loader2 className="w-8 h-8 animate-spin mb-2" />
+                        <p>Analyzing music taste...</p>
+                      </>
+                    ) : selectedFriend.musicData && (selectedFriend.musicData.trackIds.length > 0 || selectedFriend.musicData.albumIds.length > 0) ? (
+                      <div className="text-center">
+                        <p className="font-medium mb-2">Music Data Available</p>
+                        <p className="text-xs mb-3">Reviews & Favorites analyzed</p>
+                        <p className="text-xs">{selectedFriend.musicData.trackIds.length} reviews • {selectedFriend.musicData.artistNames.length} artists</p>
+                      </div>
                     ) : (
-                      <p className="text-center">No music data available for this user</p>
+                      <p className="text-center">No music data available yet for this user</p>
                     )}
                   </div>
                 )}

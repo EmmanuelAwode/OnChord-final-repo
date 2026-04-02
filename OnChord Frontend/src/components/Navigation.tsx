@@ -20,6 +20,9 @@ interface NavigationProps {
   onOpenNotifications: () => void;
   onOpenReminders: () => void;
   onLogout?: () => void;
+  // LOADING PROTECTION: Passed from App.tsx
+  // When false, all nav items and buttons are disabled to prevent clicks during auth init
+  isAuthReady?: boolean;
 }
 
 const navItems = [
@@ -32,7 +35,7 @@ const navItems = [
   { id: "your-space", label: "Your Space", icon: User },
 ];
 
-export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username, email, onOpenNotifications, onOpenReminders, onLogout }: NavigationProps) {
+export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username, email, onOpenNotifications, onOpenReminders, onLogout, isAuthReady = true }: NavigationProps) {
   const [showConnectedAccounts, setShowConnectedAccounts] = useState(false);
   const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
@@ -221,14 +224,17 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
                 <button
                   key={item.id}
                   onClick={() => onNavigate(item.id)}
+                  disabled={!isAuthReady}
                   className={cn(
                     "relative flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all duration-200 flex-shrink-0",
-                    isActive
+                    !isAuthReady
+                      ? "opacity-50 cursor-not-allowed text-muted-foreground"
+                      : isActive
                       ? "text-primary bg-gradient-to-br from-primary/20 to-accent/10 shadow-glow-primary"
                       : "text-muted-foreground hover:text-primary hover:scale-105"
                   )}
                 >
-                  <Icon className={cn("w-5 h-5", isActive && "drop-shadow-lg")} />
+                  <Icon className={cn("w-5 h-5", isActive && !isAuthReady === false && "drop-shadow-lg")} />
                   <span className="text-xs whitespace-nowrap">{item.label}</span>
                   {itemBadge > 0 && (
                     <div className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-secondary to-secondary/80 rounded-full flex items-center justify-center shadow-glow-secondary">
@@ -264,7 +270,8 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
                 {/* Reminders Button */}
                 <button
                   onClick={onOpenReminders}
-                  className="relative p-2 rounded-lg hover:bg-accent/10 hover:text-accent transition-all hover:scale-110 group"
+                  disabled={!isAuthReady}
+                  className="relative p-2 rounded-lg hover:bg-accent/10 hover:text-accent transition-all hover:scale-110 group disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-foreground disabled:hover:scale-100"
                   aria-label="Reminders"
                 >
                   <BellDot className="w-5 h-5 text-foreground group-hover:text-accent" />
@@ -314,9 +321,12 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.05, duration: 0.3 }}
                 onClick={() => onNavigate(item.id)}
+                disabled={!isAuthReady}
                 className={cn(
                   "relative w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
-                  isActive
+                  !isAuthReady
+                    ? "opacity-50 cursor-not-allowed text-muted-foreground"
+                    : isActive
                     ? "bg-gradient-to-r from-primary to-primary/80 text-white shadow-glow-primary scale-105"
                     : "text-muted-foreground hover:bg-primary/10 hover:text-primary hover:scale-105"
                 )}
@@ -392,7 +402,8 @@ export function Navigation({ currentPage, onNavigate, isOpen, onToggle, username
 
           <button
             onClick={onLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:scale-105"
+            disabled={!isAuthReady}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:hover:scale-100"
           >
             <LogOut className="w-5 h-5" />
             <span>Log Out</span>
