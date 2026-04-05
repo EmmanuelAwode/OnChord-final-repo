@@ -603,16 +603,16 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                     return (
                       <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"} animate-slide-in`}>
                         <div className={`${
-                          isMediaMessage ? 'max-w-[260px] md:max-w-[320px] p-1' : 'max-w-[min(70%,42ch)] px-3 py-2 md:px-4 md:py-3'
+                          isMediaMessage ? 'max-w-[180px] sm:max-w-[220px] md:max-w-[300px] p-1' : 'max-w-[min(70%,42ch)] px-3 py-2 md:px-4 md:py-3'
                         } rounded-2xl ${
                           msg.message_type === 'track' ? 'bg-card border border-border' :
                           isOwn ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
                         }`}>
                           {msg.message_type === 'gif' && msg.media_url && (
-                            <img src={msg.media_url} alt="GIF" className="rounded-xl max-w-full h-auto max-h-[260px] object-cover" />
+                            <img src={msg.media_url} alt="GIF" className="rounded-xl w-full h-auto max-h-[200px] sm:max-h-[240px] object-cover aspect-video" />
                           )}
                           {msg.message_type === 'image' && msg.media_url && (
-                            <img src={msg.media_url} alt="Shared image" className="rounded-xl max-w-full h-auto max-h-[260px] object-cover" />
+                            <img src={msg.media_url} alt="Shared image" className="rounded-xl w-full h-auto max-h-[200px] sm:max-h-[240px] object-cover aspect-auto" />
                           )}
                           {msg.message_type === 'track' && msg.track_id && (
                             <div className="p-2 md:p-3">
@@ -683,7 +683,7 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                           <span className="text-base leading-none">😀</span>
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent align="start" side="top" className="w-[340px] p-0 bg-card border-border shadow-xl rounded-xl">
+                      <PopoverContent align="start" side="top" className="w-[min(95vw,340px)] p-0 bg-card border-border shadow-xl rounded-xl">
                         <div className="border-b border-border px-2 py-2">
                           <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
                             <button
