@@ -134,38 +134,38 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
           continue;
         }
 
-        // Call ML service for enhanced comparison
+        // Try ML service for enhanced comparison, but always have fallback
+        let usedMl = false;
         if (mlServiceAvailable) {
-          const result = await getEnhancedTasteSimilarity(
-            {
-              trackIds: myMusicData.trackIds,
-              albumIds: myMusicData.albumIds,
-              artists: myMusicData.artistNames,
-            },
-            {
-              trackIds: theirData.trackIds,
-              albumIds: theirData.albumIds,
-              artists: theirData.artistNames,
-            }
-          );
-          
-          // Log ML response for debugging
-          console.log(`[TasteMatch] ${user.username}:`, {
-            overall: result.overall_similarity,
-            audio: result.audio_similarity,
-            breakdown: result.breakdown,
-            myArtists: myMusicData.artistNames.slice(0, 5),
-            theirArtists: theirData.artistNames.slice(0, 5),
-          });
-          
-          newCompatibilities[user.id] = {
-            similarity: Math.round(result.overall_similarity),
-            sharedArtists: result.shared_artists,
-            sharedTracks: result.shared_tracks.length,
-            sharedAlbums: result.shared_albums.length,
-          };
-        } else {
-          // Fallback: simple local comparison
+          try {
+            const result = await getEnhancedTasteSimilarity(
+              {
+                trackIds: myMusicData.trackIds,
+                albumIds: myMusicData.albumIds,
+                artists: myMusicData.artistNames,
+              },
+              {
+                trackIds: theirData.trackIds,
+                albumIds: theirData.albumIds,
+                artists: theirData.artistNames,
+              }
+            );
+            
+            newCompatibilities[user.id] = {
+              similarity: Math.round(result.overall_similarity),
+              sharedArtists: result.shared_artists,
+              sharedTracks: result.shared_tracks.length,
+              sharedAlbums: result.shared_albums.length,
+            };
+            usedMl = true;
+          } catch (mlError) {
+            // ML service failed, fall back to local comparison
+            console.debug(`ML service failed for ${user.id}, using fallback:`, mlError);
+          }
+        }
+        
+        // If ML not available or ML failed, use local comparison
+        if (!usedMl) {
           const sharedArtists = myMusicData.artistNames.filter(a => 
             theirData.artistNames.includes(a)
           );
@@ -176,7 +176,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
             theirData.albumIds.includes(a)
           );
 
-          // Calculate simple similarity
+          // Calculate simple similarity (works even without Spotify)
           const trackBonus = Math.min(sharedTracks.length * 5, 30);
           const albumBonus = Math.min(sharedAlbums.length * 3, 20);
           const artistBonus = Math.min(sharedArtists.length * 2, 25);
@@ -191,6 +191,7 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
         }
       } catch (error) {
         console.error(`Failed to compute compatibility with ${user.id}:`, error);
+        // Still show 0% match rather than failing completely
         newCompatibilities[user.id] = {
           similarity: 0,
           sharedArtists: [],
@@ -206,9 +207,9 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
     
     const matchCount = Object.values(newCompatibilities).filter(c => c.similarity > 0).length;
     if (mlServiceAvailable) {
-      toast.success(`Found ${matchCount} potential matches using advanced ML taste analysis!`);
+      toast.success(`Found ${matchCount} matches! Using advanced taste analysis (reviews, favorites, and ML).`);
     } else {
-      toast.success(`Found ${matchCount} potential matches using basic similarity mode.`);
+      toast.success(`Found ${matchCount} matches! Using basic similarity (reviews and favorites).`);
     }
   };
   
@@ -337,8 +338,8 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
           {Object.keys(userCompatibilities).length > 0 && (
             <p className="mt-2 text-xs text-primary">
               {mlServiceAvailable
-                ? "Advanced taste matching based on your reviews and favorites"
-                : "Basic taste matching based on shared tracks, albums, and artists"}
+                ? "Advanced taste matching: Reviews, favorites + AI audio analysis"
+                : "Basic taste matching: Comparing your reviews and favorites"}
             </p>
           )}
         </Card>

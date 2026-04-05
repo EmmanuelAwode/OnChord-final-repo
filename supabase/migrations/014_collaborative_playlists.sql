@@ -143,17 +143,12 @@ CREATE POLICY "collaborators_select" ON public.playlist_collaborators
         )
     );
 
--- Collaborators: Add if owner/admin
+-- Collaborators: Add if owner (creator)
 CREATE POLICY "collaborators_insert" ON public.playlist_collaborators
     FOR INSERT WITH CHECK (
         EXISTS (
             SELECT 1 FROM public.collaborative_playlists 
             WHERE id = playlist_id AND creator_id = auth.uid()
-        )
-        OR EXISTS (
-            SELECT 1 FROM public.playlist_collaborators 
-            WHERE playlist_id = playlist_collaborators.playlist_id 
-            AND user_id = auth.uid() AND role IN ('owner', 'admin')
         )
     );
 

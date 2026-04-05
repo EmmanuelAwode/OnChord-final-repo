@@ -11,7 +11,7 @@ import { EventModal } from "./EventModal";
 import { SetReminderDialog } from "./SetReminderDialog";
 import { BackButton } from "./BackButton";
 import { getHipHopEvents, searchEvents, getArtistEvents, getEventById, type TicketmasterEvent } from "../lib/api/ticketmaster";
-import { getFavorites } from "../lib/api/favorites";
+import { getFavorites, addFavorite, removeFavorite, isFavorited } from "../lib/api/favorites";
 import { toast } from "sonner";
 
 interface EventCardProps {
@@ -19,9 +19,12 @@ interface EventCardProps {
   isPersonalized?: boolean;
   onCardClick: () => void;
   onSetReminder: () => void;
+  onFavoriteArtist: (artistName: string) => void;
+  isArtistFavorited: boolean;
+  isFavoriting: boolean;
 }
 
-function EventCard({ event, isPersonalized, onCardClick, onSetReminder }: EventCardProps) {
+function EventCard({ event, isPersonalized, onCardClick, onSetReminder, onFavoriteArtist, isArtistFavorited, isFavoriting }: EventCardProps) {
   return (
     <Card
       className="overflow-hidden bg-card border-border hover:border-primary transition-all group cursor-pointer"
@@ -47,6 +50,28 @@ function EventCard({ event, isPersonalized, onCardClick, onSetReminder }: EventC
               </Badge>
             )}
           </div>
+          {/* Favorite Artist Button - Top Right */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onFavoriteArtist(event.artistName);
+            }}
+            disabled={isFavoriting}
+            className={`absolute top-4 right-4 rounded-full p-2 transition-all transform ${
+              isFavoriting 
+                ? "bg-black/80 scale-110" 
+                : "bg-black/60 hover:bg-black/80"
+            } disabled:opacity-50 hover:scale-110`}
+            title={isArtistFavorited ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Heart 
+              className={`w-5 h-5 transition-all ${
+                isArtistFavorited 
+                  ? "fill-red-500 text-red-500" 
+                  : "text-white hover:text-red-500"
+              } ${isFavoriting ? "animate-pulse" : ""}`}
+            />
+          </button>
         </div>
 
         {/* Event Details */}
@@ -122,6 +147,7 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
   const [events, setEvents] = useState<TicketmasterEvent[]>([]);
   const [personalizedEvents, setPersonalizedEvents] = useState<TicketmasterEvent[]>([]);
   const [favoriteArtists, setFavoriteArtists] = useState<string[]>([]);
+  const [favoritingArtist, setFavoritingArtist] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isLoadingPersonalized, setIsLoadingPersonalized] = useState(false);
@@ -338,6 +364,95 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
       setEvents([]); // Show empty state on search error
     } finally {
       setIsSearching(false);
+    }
+  }
+
+  // Normalize artist name: remove leading "The " (case-insensitive) and lowercase
+  function normalizeArtistName(name: string): string {
+    return name.toLowerCase().trim().replace(/^the\s+/, '');
+  }
+
+  async function handleFavoriteArtist(artistName: string) {
+    try {
+      setFavoritingArtist(artistName);
+      
+      // Normalize for storage and comparison (removes "The " prefix)
+      const normalizedName = normalizeArtistName(artistName);
+      
+      // First, get current favorites from DB to check actual state
+      const allFavorites = await getFavorites('artist');
+      const matchingFav = allFavorites.find(fav => {
+        const storedNormalized = normalizeArtistName(fav.item_artist || fav.item_title || fav.item_id || '');
+        const searchNormalized = normalizedName;
+        return storedNormalized === searchNormalized;
+      });
+      
+      const isFav = !!matchingFav;
+      
+      console.log(`[Favorite Toggle] Checking "${artistName}":`, {
+        normalizedName,
+        isFav,
+        matchingFav: matchingFav ? { item_id: matchingFav.item_id, item_artist: matchingFav.item_artist } : null
+      });
+      
+      if (isFav && matchingFav) {
+        // Remove from favorites - use the actual stored item_id
+        console.log(`[Removing] "${artistName}" (normalized: "${normalizedName}") using item_id="${matchingFav.item_id}"...`);
+        await removeFavorite(matchingFav.item_id, "artist");
+        
+        // Remove all events from this artist from personalized events immediately
+        setPersonalizedEvents(prev => {
+          const filtered = prev.filter(event => normalizeArtistName(event.artistName) !== normalizedName);
+          console.log(`[Filtered] Removed "${artistName}" events. Remaining: ${filtered.length} events`);
+          return filtered;
+        });
+        
+        // Reload favorite artists from database to stay in sync
+        console.log(`[Reloading] Favorite artists from database...`);
+        const favorites = await getFavorites('artist');
+        const artistNames = favorites
+          .map(f => f.item_artist || f.item_title)
+          .filter((name): name is string => !!name);
+        
+        setFavoriteArtists(artistNames);
+        console.log(`[Updated] New favorite artists list:`, artistNames);
+        
+        toast.success(`Removed ${artistName} from favorites`);
+      } else {
+        // Add to favorites - first check for and remove any similar artist variants
+        console.log(`[Adding] "${artistName}" to favorites (normalized: "${normalizedName}")...`);
+        
+        // Remove any existing favorites with similar normalized names (cleans up duplicates like "Luniz" vs "The Luniz")
+        const allFavorites = await getFavorites('artist');
+        const similarFavs = allFavorites.filter(fav => {
+          const favNormalized = normalizeArtistName(fav.item_artist || fav.item_title || fav.item_id || '');
+          return favNormalized === normalizedName;
+        });
+        
+        for (const fav of similarFavs) {
+          console.log(`[Cleanup] Removing similar artist variant: "${fav.item_artist}" (item_id="${fav.item_id}")`);
+          await removeFavorite(fav.item_id, "artist");
+        }
+        
+        // Now add the normalized version
+        await addFavorite(normalizedName, "artist", {
+          title: artistName,
+          artist: artistName,
+        });
+        setFavoriteArtists(prev => [...prev, artistName]);
+        console.log(`[Added] "${artistName}" is now favorited`);
+        
+        toast.success(`Added ${artistName} to favorites! 🎉`);
+        
+        // Reload personalized events to include this new favorite
+        console.log(`[Loading] Personalized events...`);
+        loadPersonalizedEvents();
+      }
+    } catch (err) {
+      console.error('Failed to update favorite:', err);
+      toast.error('Failed to update favorite. Please try again.');
+    } finally {
+      setFavoritingArtist(null);
     }
   }
 
@@ -616,6 +731,9 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
                       setReminderEventData(event);
                       setReminderDialogOpen(true);
                     }}
+                    onFavoriteArtist={handleFavoriteArtist}
+                    isArtistFavorited={favoriteArtists.some(a => a.toLowerCase() === event.artistName.toLowerCase())}
+                    isFavoriting={favoritingArtist?.toLowerCase() === event.artistName.toLowerCase()}
                   />
                 ))}
               </div>
@@ -686,6 +804,9 @@ export function EventsPage({ onNavigate, onBack, canGoBack, initialEventId }: Ev
                       setReminderEventData(event);
                       setReminderDialogOpen(true);
                     }}
+                    onFavoriteArtist={handleFavoriteArtist}
+                    isArtistFavorited={favoriteArtists.some(a => a.toLowerCase() === event.artistName.toLowerCase())}
+                    isFavoriting={favoritingArtist?.toLowerCase() === event.artistName.toLowerCase()}
                   />
                 ))}
               </div>

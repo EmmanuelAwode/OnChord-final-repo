@@ -1,10 +1,9 @@
-import { Heart, MessageCircle, Share2, TrendingUp, Clock, Calendar, Star, Music2, Headphones, Users, Info, Edit3, Search, Plus, Sparkles, Flame, MapPin, Play, Disc3, UserPlus, Trash2, Activity } from "lucide-react";
+import { Heart, MessageCircle, Share2, TrendingUp, Clock, Calendar, Star, Music2, Headphones, Users, Info, Edit3, Search, Plus, Sparkles, Flame, MapPin, Play, Disc3, UserPlus, Trash2 } from "lucide-react";
 import { EditedIndicator } from "./EditedIndicator";
 import { ReviewDetailModal } from "./ReviewDetailModal";
 import { EmptyState } from "./EmptyState";
 import { ExpandableReviewCard } from "./ExpandableReviewCard";
 import { CommentsModal } from "./CommentsModal";
-import ActivityFeed from "./ActivityFeed";
 import { useState, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -90,6 +89,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
   const [loadingReleases, setLoadingReleases] = useState(true);
   const [loadingConcerts, setLoadingConcerts] = useState(true);
   const [followerCount, setFollowerCount] = useState(0);
+  const [communityReviewsDisplayCount, setCommunityReviewsDisplayCount] = useState(5);
   
   // Load current user ID and profile
   useEffect(() => {
@@ -119,7 +119,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
     async function loadFeed() {
       try {
         const [pubReviews, frReviews] = await Promise.all([
-          getPublicReviews(20),
+          getPublicReviews(50),
           getFriendsReviews()
         ]);
         setPublicReviewsList(pubReviews);
@@ -139,11 +139,11 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
         setTimeout(() => reject(new Error('Request timeout')), ms)
       );
 
-      // Load releases in parallel with timeout (Spotify usually fast, 20 seconds)
+      // Load releases in parallel with timeout (Spotify can take 30-40 seconds for 10 artists × 8s timeout)
       setLoadingReleases(true);
       Promise.race([
         getPersonalizedNewReleases(4),
-        timeoutPromise(20000) // Increased to 20 seconds for better reliability
+        timeoutPromise(40000) // 40 seconds: accounts for 10 artists × 8s timeout + delays
       ])
         .then(releases => {
           setPersonalizedReleases(releases as typeof personalizedReleases);
@@ -161,7 +161,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
       setLoadingConcerts(true);
       Promise.race([
         getPersonalizedConcerts(4),
-        timeoutPromise(60000) // Increased to 60 seconds: accounts for 15 artists × rate limiter + network latency
+        timeoutPromise(120000) // 120 seconds: accounts for 10+ artists + Supabase queries + Ticketmaster rate limiting
       ])
         .then(concerts => {
           setPersonalizedConcerts(concerts as typeof personalizedConcerts);
@@ -189,6 +189,8 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
   // Community: real public reviews from other users
   const communityReviews = publicReviewsList.filter(r => r.userId !== currentUserId);
   const feedReviews = communityReviews;
+  const displayedFeedReviews = feedReviews.slice(0, communityReviewsDisplayCount);
+  const hasMoreReviews = feedReviews.length > communityReviewsDisplayCount;
 
   const { toggleFollow, isFollowing, isLoading: isFollowsLoading } = useSupabaseFollows();
   const { toggleLike: toggleLikePersist, isLiked } = useLikes();
@@ -294,73 +296,6 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
 
   const hasSearchResults = searchQuery.trim() && (searchAlbumsResults.length > 0 || searchUsersResults.length > 0 || filteredReviews.length > 0);
 
-  // Show loading screen while initial data loads
-  // Show if either is still loading and we haven't started showing any content yet
-  const isInitialLoading = loadingReleases || loadingConcerts;
-  const hasAnyContent = personalizedReleases.length > 0 || personalizedConcerts.length > 0;
-
-  if (isInitialLoading && !hasAnyContent) {
-    return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center justify-center gap-6 px-4">
-          {/* Animated Loading Icon */}
-          <div className="relative">
-            <div className="w-16 h-16 rounded-full border-4 border-muted border-t-primary animate-spin"></div>
-            <Music2 className="w-8 h-8 text-primary absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-          </div>
-          
-          {/* Loading Text */}
-          <div className="text-center space-y-2">
-            <h2 className="text-2xl font-semibold text-foreground">Loading Your Dashboard</h2>
-            <p className="text-muted-foreground">Fetching personalized releases and concerts...</p>
-          </div>
-
-          {/* Loading Progress Indicators */}
-          <div className="mt-4 space-y-3 w-full max-w-xs">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">
-                  <Sparkles className="w-4 h-4 inline-block mr-2" />
-                  Releases
-                </span>
-                {loadingReleases ? (
-                  <span className="text-primary text-xs">Loading...</span>
-                ) : (
-                  <span className="text-green-500 text-xs">✓ Ready</span>
-                )}
-              </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div className={`h-full ${loadingReleases ? "bg-primary animate-pulse" : "bg-green-500"} rounded-full transition-all duration-500`} style={{ width: loadingReleases ? "60%" : "100%" }}></div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">
-                  <MapPin className="w-4 h-4 inline-block mr-2" />
-                  Concerts
-                </span>
-                {loadingConcerts ? (
-                  <span className="text-primary text-xs">Loading...</span>
-                ) : (
-                  <span className="text-green-500 text-xs">✓ Ready</span>
-                )}
-              </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div className={`h-full ${loadingConcerts ? "bg-primary animate-pulse" : "bg-green-500"} rounded-full transition-all duration-500`} style={{ width: loadingConcerts ? "45%" : "100%" }}></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Tip */}
-          <p className="text-xs text-muted-foreground mt-4 text-center max-w-xs">
-            Personalizing your content based on your music taste...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen relative pb-12">
       {/* Hero Header Section */}
@@ -451,11 +386,6 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
             <Users className="w-3 h-3 sm:w-4 sm:h-4" />
             <span className="hidden sm:inline">Community</span>
             <span className="sm:hidden">Feed</span>
-          </TabsTrigger>
-          <TabsTrigger value="activity" className="flex-1 text-xs sm:text-sm">
-            <Activity className="w-3 h-3 sm:w-4 sm:h-4" />
-            <span className="hidden sm:inline">Activity</span>
-            <span className="sm:hidden">Live</span>
           </TabsTrigger>
           <TabsTrigger value="discover" className="flex-1 text-xs sm:text-sm">
             <Sparkles className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -622,10 +552,10 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
             </div>
           </section>
 
-          {/* Your Collections */}
-          <section className="space-y-4" role="region" aria-label="Your collections">
+          {/* Your Lists */}
+          <section className="space-y-4" role="region" aria-label="Your lists">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl md:text-2xl text-foreground">Your Collections</h2>
+              <h2 className="text-xl md:text-2xl text-foreground">Your Lists</h2>
               <Button 
                 variant="ghost" 
                 size="sm"
@@ -672,14 +602,14 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
               ) : (
                 <Card className="p-6 col-span-full bg-card border-border text-center">
                   <Music2 className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-                  <p className="text-muted-foreground mb-3">No collections yet</p>
+                  <p className="text-muted-foreground mb-3">No lists yet</p>
                   <Button 
                     variant="outline" 
                     onClick={() => onNavigate?.("your-space-lists")}
                     className="border-primary text-primary hover:bg-primary/10"
                   >
                     <Plus className="w-4 h-4 mr-2" />
-                    Create a Collection
+                    Create a List
                   </Button>
                 </Card>
               )}
@@ -700,7 +630,7 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
           </div>
 
           <div className="grid gap-4">
-            {feedReviews.map((review, index) => (
+            {displayedFeedReviews.map((review, index) => (
               <Card 
                 key={`friend-review-${review.id}-${index}`}
                 onClick={() => handleReviewClick(review)}
@@ -827,11 +757,19 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
               </Card>
             ))}
           </div>
-        </TabsContent>
 
-        {/* Activity Tab */}
-        <TabsContent value="activity" className="space-y-6" role="region" aria-label="Live activity feed">
-          <ActivityFeed />
+          {/* Load More Button */}
+          {hasMoreReviews && (
+            <div className="pt-4">
+              <Button
+                onClick={() => setCommunityReviewsDisplayCount(prev => prev + 5)}
+                variant="outline"
+                className="w-full border-primary/30 text-primary hover:bg-primary/10 hover:border-primary"
+              >
+                Load More Reviews
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
         {/* Discover Tab */}

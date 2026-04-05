@@ -19,12 +19,12 @@ const moodIcons: Record<string, any> = {
   Party: PartyPopper,
 };
 
-interface PlaylistMoodPageProps {
+interface MoodAnalysisPageProps {
   onBack?: () => void;
   canGoBack?: boolean;
 }
 
-export function PlaylistMoodPage({ onBack, canGoBack }: PlaylistMoodPageProps) {
+export function MoodAnalysisPage({ onBack, canGoBack }: MoodAnalysisPageProps) {
   const [selectedTimeRange, setSelectedTimeRange] = useState<"short_term" | "medium_term" | "long_term">("medium_term");
   const [lastRunAt, setLastRunAt] = useState<Date | null>(null);
   const [moodData, setMoodData] = useState<MoodClassifyResponse | null>(null);
@@ -111,7 +111,7 @@ export function PlaylistMoodPage({ onBack, canGoBack }: PlaylistMoodPageProps) {
       {canGoBack && onBack && <BackButton onClick={onBack} />}
       
       <div className="text-center space-y-2">
-        <h1 className="text-3xl text-foreground">Playlist Mood Analysis</h1>
+        <h1 className="text-3xl text-foreground">Music Mood Analysis</h1>
         <p className="text-muted-foreground max-w-2xl mx-auto">
           Analyze your Spotify top tracks with our ML mood classifier
         </p>

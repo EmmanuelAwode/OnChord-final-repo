@@ -20,7 +20,6 @@ import {
   Palette, 
   User, 
   Music, 
-  Globe, 
   Volume2,
   Download,
   Eye,
@@ -51,46 +50,6 @@ const accentColors = [
   { name: "Pink", value: "#F472B6", id: "pink" },
   { name: "Green", value: "#34D399", id: "green" },
   { name: "Orange", value: "#FBBF24", id: "orange" },
-];
-
-const languages = [
-  { code: "en", name: "English", flag: "🇺🇸" },
-  { code: "es", name: "Español", flag: "🇪🇸" },
-  { code: "fr", name: "Français", flag: "🇫🇷" },
-  { code: "de", name: "Deutsch", flag: "🇩🇪" },
-  { code: "it", name: "Italiano", flag: "🇮🇹" },
-  { code: "pt", name: "Português", flag: "🇧🇷" },
-  { code: "ja", name: "日本語", flag: "🇯🇵" },
-  { code: "ko", name: "한국어", flag: "🇰🇷" },
-  { code: "zh", name: "中文", flag: "🇨🇳" },
-];
-
-const regions = [
-  { code: "auto", name: "Automatic (Device region)", flag: "🌐" },
-  { code: "US", name: "United States", flag: "🇺🇸" },
-  { code: "GB", name: "United Kingdom", flag: "🇬🇧" },
-  { code: "CA", name: "Canada", flag: "🇨🇦" },
-  { code: "AU", name: "Australia", flag: "🇦🇺" },
-  { code: "DE", name: "Germany", flag: "🇩🇪" },
-  { code: "FR", name: "France", flag: "🇫🇷" },
-  { code: "ES", name: "Spain", flag: "🇪🇸" },
-  { code: "IT", name: "Italy", flag: "🇮🇹" },
-  { code: "BR", name: "Brazil", flag: "🇧🇷" },
-  { code: "JP", name: "Japan", flag: "🇯🇵" },
-  { code: "KR", name: "South Korea", flag: "🇰🇷" },
-  { code: "CN", name: "China", flag: "🇨🇳" },
-  { code: "IN", name: "India", flag: "🇮🇳" },
-];
-
-const dateFormats = [
-  { id: "mdy", label: "MM/DD/YYYY", example: "10/01/2025" },
-  { id: "dmy", label: "DD/MM/YYYY", example: "01/10/2025" },
-  { id: "ymd", label: "YYYY-MM-DD", example: "2025-10-01" },
-];
-
-const timeFormats = [
-  { id: "12h", label: "12-hour (AM/PM)", example: "2:30 PM" },
-  { id: "24h", label: "24-hour", example: "14:30" },
 ];
 
 interface SettingsPageProps {
@@ -255,38 +214,6 @@ export function SettingsPage({
   const [reduceMotion, setReduceMotion] = useState(() => loadSetting("reduceMotion", false));
   const [highContrast, setHighContrast] = useState(() => loadSetting("highContrast", false));
 
-  // Language & Region
-  const [language, setLanguage] = useState(() => loadSetting("language", "en"));
-  const [region, setRegion] = useState(() => loadSetting("region", "auto"));
-  const [dateFormat, setDateFormat] = useState(() => loadSetting("dateFormat", "mdy"));
-  const [timeFormat, setTimeFormat] = useState(() => loadSetting("timeFormat", "12h"));
-  const [timezone, setTimezone] = useState(() => loadSetting("timezone", "auto"));
-  const [dateTimePreview, setDateTimePreview] = useState("");
-
-  const availableTimezones = (() => {
-    try {
-      if (typeof Intl !== "undefined" && typeof (Intl as any).supportedValuesOf === "function") {
-        return (Intl as any).supportedValuesOf("timeZone") as string[];
-      }
-    } catch {
-      // Fallback handled below.
-    }
-
-    return [
-      "UTC",
-      "America/New_York",
-      "America/Chicago",
-      "America/Denver",
-      "America/Los_Angeles",
-      "Europe/London",
-      "Europe/Paris",
-      "Asia/Tokyo",
-      "Asia/Seoul",
-      "Asia/Shanghai",
-      "Australia/Sydney",
-    ];
-  })();
-
   // Audio settings
   const [audioQuality, setAudioQuality] = useState(() => loadSetting("audioQuality", "high"));
   const [normalizeVolume, setNormalizeVolume] = useState(() => loadSetting("normalizeVolume", true));
@@ -334,11 +261,6 @@ export function SettingsPage({
   useEffect(() => { saveSetting("displayDensity", displayDensity); }, [displayDensity]);
   useEffect(() => { saveSetting("reduceMotion", reduceMotion); }, [reduceMotion]);
   useEffect(() => { saveSetting("highContrast", highContrast); }, [highContrast]);
-  useEffect(() => { saveSetting("language", language); }, [language]);
-  useEffect(() => { saveSetting("region", region); }, [region]);
-  useEffect(() => { saveSetting("dateFormat", dateFormat); }, [dateFormat]);
-  useEffect(() => { saveSetting("timeFormat", timeFormat); }, [timeFormat]);
-  useEffect(() => { saveSetting("timezone", timezone); }, [timezone]);
   useEffect(() => { saveSetting("audioQuality", audioQuality); }, [audioQuality]);
   useEffect(() => { saveSetting("normalizeVolume", normalizeVolume); }, [normalizeVolume]);
   useEffect(() => { saveSetting("crossfade", crossfade); }, [crossfade]);
@@ -378,73 +300,10 @@ export function SettingsPage({
     document.documentElement.setAttribute("data-density", displayDensity);
   }, [displayDensity]);
 
-  // Migrate legacy timezone values from earlier settings versions.
-  useEffect(() => {
-    const legacyToIana: Record<string, string> = {
-      utc: "UTC",
-      est: "America/New_York",
-      pst: "America/Los_Angeles",
-      cet: "Europe/Paris",
-      jst: "Asia/Tokyo",
-    };
-
-    const mapped = legacyToIana[timezone];
-    if (mapped) {
-      setTimezone(mapped);
-    }
-  }, [timezone]);
-
   // Apply font size on mount
   useEffect(() => {
     document.documentElement.style.setProperty("--font-size", `${fontSize[0]}px`);
   }, []);
-
-  // Apply language/locale settings immediately.
-  useEffect(() => {
-    const browserLocale = navigator.language || "en-US";
-    const detectedRegion = browserLocale.split("-")[1] || "US";
-    const effectiveRegion = region === "auto" ? detectedRegion : region;
-    const locale = `${language}-${effectiveRegion}`;
-
-    document.documentElement.lang = language;
-    document.documentElement.setAttribute("data-locale", locale);
-  }, [language, region]);
-
-  // Build a live preview for date/time settings using selected locale + timezone.
-  useEffect(() => {
-    const browserLocale = navigator.language || "en-US";
-    const detectedRegion = browserLocale.split("-")[1] || "US";
-    const effectiveRegion = region === "auto" ? detectedRegion : region;
-    const locale = `${language}-${effectiveRegion}`;
-
-    const resolvedTimezone =
-      timezone === "auto"
-        ? Intl.DateTimeFormat().resolvedOptions().timeZone
-        : timezone;
-
-    const sampleDate = new Date("2026-03-15T14:30:00");
-
-    const dateOptionsByFormat: Record<string, Intl.DateTimeFormatOptions> = {
-      mdy: { month: "2-digit", day: "2-digit", year: "numeric" },
-      dmy: { day: "2-digit", month: "2-digit", year: "numeric" },
-      ymd: { year: "numeric", month: "2-digit", day: "2-digit" },
-    };
-
-    const previewDate = new Intl.DateTimeFormat(locale, {
-      ...(dateOptionsByFormat[dateFormat] || dateOptionsByFormat.mdy),
-      timeZone: resolvedTimezone,
-    }).format(sampleDate);
-
-    const previewTime = new Intl.DateTimeFormat(locale, {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: timeFormat === "12h",
-      timeZone: resolvedTimezone,
-      timeZoneName: "short",
-    }).format(sampleDate);
-
-    setDateTimePreview(`${previewDate} ${previewTime}`);
-  }, [language, region, dateFormat, timeFormat, timezone]);
 
   // Modals
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -557,10 +416,6 @@ export function SettingsPage({
           <TabsTrigger value="appearance" className="flex items-center gap-2">
             <Palette className="w-4 h-4" />
             <span className="hidden sm:inline">Appearance</span>
-          </TabsTrigger>
-          <TabsTrigger value="language" className="flex items-center gap-2">
-            <Globe className="w-4 h-4" />
-            <span className="hidden sm:inline">Language</span>
           </TabsTrigger>
           <TabsTrigger value="audio" className="flex items-center gap-2">
             <Volume2 className="w-4 h-4" />
@@ -720,124 +575,6 @@ export function SettingsPage({
                   </div>
                   <Switch checked={highContrast} onCheckedChange={setHighContrast} />
                 </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Language & Region Settings */}
-        <TabsContent value="language" className="space-y-6 mt-6">
-          <Card className="p-6 bg-card border-border">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="bg-secondary/20 p-2 rounded-lg">
-                <Globe className="w-5 h-5 text-secondary" />
-              </div>
-              <h2 className="text-xl text-foreground">Language & Region</h2>
-            </div>
-
-            <div className="space-y-6">
-              {/* Language Selection */}
-              <div>
-                <Label className="text-foreground mb-3 block">Display Language</Label>
-                <Select value={language} onValueChange={setLanguage}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {languages.map((lang) => (
-                      <SelectItem key={lang.code} value={lang.code}>
-                        <span className="flex items-center gap-2">
-                          <span>{lang.flag}</span>
-                          <span>{lang.name}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Applied immediately across the app where locale settings are supported
-                </p>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Region Selection */}
-              <div>
-                <Label className="text-foreground mb-3 block">Region</Label>
-                <Select value={region} onValueChange={setRegion}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {regions.map((item) => (
-                      <SelectItem key={item.code} value={item.code}>
-                        <span className="flex items-center gap-2">
-                          <span>{item.flag}</span>
-                          <span>{item.name}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Date Format */}
-              <div>
-                <Label className="text-foreground mb-3 block">Date Format</Label>
-                <Select value={dateFormat} onValueChange={setDateFormat}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {dateFormats.map((format) => (
-                      <SelectItem key={format.id} value={format.id}>
-                        {format.label} - {format.example}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Time Format */}
-              <div>
-                <Label className="text-foreground mb-3 block">Time Format</Label>
-                <Select value={timeFormat} onValueChange={setTimeFormat}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {timeFormats.map((format) => (
-                      <SelectItem key={format.id} value={format.id}>
-                        {format.label} - {format.example}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Timezone */}
-              <div>
-                <Label className="text-foreground mb-3 block">Timezone</Label>
-                <Select value={timezone} onValueChange={setTimezone}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Automatic (Detect from device)</SelectItem>
-                    {availableTimezones.map((tz) => (
-                      <SelectItem key={tz} value={tz}>
-                        {tz}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-2">Preview: {dateTimePreview}</p>
               </div>
             </div>
           </Card>

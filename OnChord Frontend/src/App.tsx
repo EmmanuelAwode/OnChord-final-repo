@@ -14,6 +14,7 @@ import { AlbumModal } from "./components/AlbumModal";
 import { ReviewCreationModal } from "./components/ReviewCreationModal";
 import { useReviews } from "./lib/useUserInteractions";
 import { useNavigationHistory } from "./lib/useNavigationHistory";
+import { setupSessionCacheListener } from "./lib/sessionCache";
 import { supabase } from "./lib/supabaseClient";
 import { getAlbum, isSpotifyAutolinkDisabled } from "./lib/api/spotify";
 import { Toaster } from "./components/ui/sonner";
@@ -132,7 +133,7 @@ export default function App() {
     }
   };
 
-  const AUTH_INIT_TIMEOUT_MS = 10000; // Reduced from 60s - session check only
+  const AUTH_INIT_TIMEOUT_MS = 20000; // Auth session lookup with timeout
   const PROFILE_INIT_TIMEOUT_MS = 45000; // Increased for slow network (was 30s)
 
   const isTimeoutError = (error: unknown) =>
@@ -261,6 +262,10 @@ export default function App() {
     }
   };
 
+  // Initialize session cache listener (reduces redundant auth calls)
+  useEffect(() => {
+    setupSessionCacheListener();
+  }, []);
 
   useEffect(() => {
     let mounted = true;

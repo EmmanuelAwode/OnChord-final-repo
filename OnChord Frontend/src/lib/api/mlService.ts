@@ -223,7 +223,7 @@ async function fetchMlJson<T>(
 /**
  * Classify playlist mood from audio features
  */
-export async function classifyPlaylistMood(
+export async function classifyMusicMood(
   tracks: AudioFeatures[]
 ): Promise<MoodClassifyResponse> {
   return fetchMlJson(

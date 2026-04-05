@@ -27,16 +27,23 @@ export async function addFavorite(
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) throw new Error("Not authenticated");
 
-  const { error } = await supabase.from("favorites").insert({
+  console.log(`[addFavorite] Adding: itemId="${itemId}", itemType="${itemType}", title="${metadata?.title}"`);
+
+  const { error, data } = await supabase.from("favorites").insert({
     user_id: session.session.user.id,
     item_id: itemId,
     item_type: itemType,
     item_title: metadata?.title,
     item_artist: metadata?.artist,
     item_cover: metadata?.cover,
-  });
+  }).select();
 
-  if (error) throw error;
+  if (error) {
+    console.error(`[addFavorite] Error inserting:`, error);
+    throw error;
+  }
+
+  console.log(`[addFavorite] Successfully inserted favorite:`, data?.[0]);
 }
 
 /**
@@ -49,14 +56,22 @@ export async function removeFavorite(
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) throw new Error("Not authenticated");
 
-  const { error } = await supabase
+  console.log(`[removeFavorite] Deleting: itemId="${itemId}", itemType="${itemType}", userId=${session.session.user.id.slice(0, 8)}...`);
+
+  const { error, data } = await supabase
     .from("favorites")
     .delete()
     .eq("user_id", session.session.user.id)
     .eq("item_id", itemId)
-    .eq("item_type", itemType);
+    .eq("item_type", itemType)
+    .select();
 
-  if (error) throw error;
+  if (error) {
+    console.error(`[removeFavorite] Error deleting:`, error);
+    throw error;
+  }
+
+  console.log(`[removeFavorite] Successfully deleted ${data?.length || 0} favorite(s)`);
 }
 
 /**

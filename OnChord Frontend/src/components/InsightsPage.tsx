@@ -4,8 +4,7 @@ import { Brain, Users, Sparkles, BarChart3, Music, TrendingUp, Disc, Headphones,
 import { Card } from "./ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { TasteMatchingPage } from "./TasteMatchingPage";
-import { PlaylistMoodPage } from "./PlaylistMoodPage";
-import { MusicPersonalityPage } from "./MusicPersonalityPage";
+import { MoodAnalysisPage } from "./MoodAnalysisPage";
 import { getFriendsReviews, type Review } from "../lib/api/reviews";
 import { getListeningStats, type ListeningStats, type MonthlyListening } from "../lib/api/insightsData";
 import { checkMlServiceHealth, type MlServiceHealth } from "../lib/api/mlService";
@@ -90,7 +89,7 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
 
       {/* Insights Tabs */}
       <Tabs defaultValue={defaultTab} className="w-full">
-        <TabsList className="bg-card border border-border w-full md:w-auto grid grid-cols-2 md:grid-cols-4 gap-2 p-1">
+        <TabsList className="bg-card border border-border w-full md:w-auto grid grid-cols-2 md:grid-cols-3 gap-2 p-1">
           <TabsTrigger
             value="dashboard"
             className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-chart-5 data-[state=active]:to-chart-5/80 data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
@@ -115,14 +114,7 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
             <span className="hidden sm:inline">Mood Analysis</span>
             <span className="sm:hidden">Mood</span>
           </TabsTrigger>
-          <TabsTrigger
-            value="personality"
-            className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-accent data-[state=active]:to-accent/80 data-[state=active]:text-accent-foreground data-[state=active]:shadow-md"
-          >
-            <Brain className="w-4 h-4 mr-2" />
-            <span className="hidden sm:inline">Personality</span>
-            <span className="sm:hidden">Profile</span>
-          </TabsTrigger>
+
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-6">
@@ -279,11 +271,7 @@ export function InsightsPage({ onNavigate, defaultTab = "dashboard" }: InsightsP
         </TabsContent>
 
         <TabsContent value="mood" className="mt-6">
-          <PlaylistMoodPage />
-        </TabsContent>
-
-        <TabsContent value="personality" className="mt-6">
-          <MusicPersonalityPage onNavigate={onNavigate} />
+          <MoodAnalysisPage />
         </TabsContent>
       </Tabs>
     </div>

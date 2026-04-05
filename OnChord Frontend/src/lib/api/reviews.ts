@@ -1,5 +1,7 @@
 // src/lib/api/reviews.ts
 import { supabase } from "../supabaseClient";
+import { getCachedSession } from "../sessionCache";
+import { getCachedResult, cacheResult, invalidateCache } from "../queryCache";
 import type { Review } from "../useUserInteractions";
 import { fixSpotifyImageUrl } from "../../components/ui/utils";
 import { formatDateForDisplay } from "../localeFormatting";
@@ -97,7 +99,7 @@ function getRelativeTime(date: Date): string {
  * Get current user's reviews with pagination (default: first 25 reviews)
  */
 export async function getReviews(limit = 25, offset = 0): Promise<Review[]> {
-  const { data: session } = await supabase.auth.getSession();
+  const { data: session } = await getCachedSession();
   if (!session.session) return [];
 
   const { data, error } = await supabase
@@ -112,9 +114,17 @@ export async function getReviews(limit = 25, offset = 0): Promise<Review[]> {
 }
 
 /**
- * Get all public reviews (feed)
+ * Get all public reviews (feed) - cached for 5 minutes to reduce Supabase calls
  */
 export async function getPublicReviews(limit = 50): Promise<Review[]> {
+  const cacheKey = `public_reviews_${limit}`;
+  
+  // Check cache first
+  const cached = getCachedResult<Review[]>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const { data, error } = await supabase
     .from("reviews")
     .select("*")
@@ -123,22 +133,38 @@ export async function getPublicReviews(limit = 50): Promise<Review[]> {
     .limit(limit);
 
   if (error) throw error;
-  return (data as DbReview[]).map(mapDbToUi);
+  
+  const result = (data as DbReview[]).map(mapDbToUi);
+  
+  // Cache for 5 minutes
+  cacheResult(cacheKey, result, 5 * 60 * 1000);
+  
+  return result;
 }
 
 /**
  * Get public reviews from users the current user follows (limited to 20 recent reviews)
  * Only fetches from first 50 followed users to avoid large IN clauses
+ * Results cached for 3 minutes
  */
 export async function getFriendsReviews(limit = 20, offset = 0): Promise<Review[]> {
-  const { data: session } = await supabase.auth.getSession();
+  const { data: session } = await getCachedSession();
   if (!session.session) return [];
+
+  const userId = session.session.user.id;
+  const cacheKey = `friends_reviews_${userId}_${limit}_${offset}`;
+  
+  // Check cache first
+  const cached = getCachedResult<Review[]>(cacheKey);
+  if (cached) {
+    return cached;
+  }
 
   // Get followed user IDs (capped at 50 to avoid overly large IN clauses)
   const { data: follows } = await supabase
     .from("follows")
     .select("following_id")
-    .eq("follower_id", session.session.user.id)
+    .eq("follower_id", userId)
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -154,7 +180,13 @@ export async function getFriendsReviews(limit = 20, offset = 0): Promise<Review[
     .range(offset, offset + limit - 1);
 
   if (error) throw error;
-  return (data as DbReview[]).map(mapDbToUi);
+  
+  const result = (data as DbReview[]).map(mapDbToUi);
+  
+  // Cache for 3 minutes (shorter than public reviews since it's user-specific)
+  cacheResult(cacheKey, result, 3 * 60 * 1000);
+  
+  return result;
 }
 
 /**
@@ -286,6 +318,11 @@ export async function createReview(
     .single();
 
   if (error) throw error;
+  
+  // Invalidate public reviews cache since a new review may be public
+  invalidateCache(/^public_reviews_/);
+  invalidateCache(/^friends_reviews_/);
+  
   return mapDbToUi(data as DbReview);
 }
 
@@ -328,10 +365,19 @@ export async function updateReviewApi(
     .single();
 
   if (error) throw error;
+  
+  // Invalidate public reviews cache since review visibility may have changed
+  invalidateCache(/^public_reviews_/);
+  invalidateCache(/^friends_reviews_/);
+  
   return mapDbToUi(data as DbReview);
 }
 
 export async function deleteReviewApi(reviewId: string): Promise<void> {
   const { error } = await supabase.from("reviews").delete().eq("id", reviewId);
   if (error) throw error;
+  
+  // Invalidate public reviews cache since a review was deleted
+  invalidateCache(/^public_reviews_/);
+  invalidateCache(/^friends_reviews_/);
 }
