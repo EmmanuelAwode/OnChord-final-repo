@@ -22,6 +22,48 @@ interface CollaborativePlaylistsHubProps {
   canGoBack?: boolean;
 }
 
+const nonFatalReadErrorCodes = new Set(["42P01", "PGRST205", "42P17"]);
+let hasWarnedPolicyRecursion = false;
+let forceLegacyCollabMode = false;
+
+function isNonFatalReadError(error: any): boolean {
+  return !!error && nonFatalReadErrorCodes.has(error.code);
+}
+
+function isPolicyRecursionError(error: any): boolean {
+  return !!error && error.code === "42P17";
+}
+
+function warnOnceForPolicyRecursion(error: any): void {
+  if (!error || !isPolicyRecursionError(error) || hasWarnedPolicyRecursion) {
+    return;
+  }
+
+  forceLegacyCollabMode = true;
+  hasWarnedPolicyRecursion = true;
+  console.warn(
+    "Collaborative playlist policy recursion detected (42P17). Using legacy playlist fallback mode until 021_fix_collab_policy_recursion.sql is applied."
+  );
+}
+
+function formatLastUpdated(value: string | null | undefined): string {
+  if (!value) return "Just now";
+
+  const updated = new Date(value).getTime();
+  if (Number.isNaN(updated)) return "Just now";
+
+  const diffMs = Date.now() - updated;
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  if (diffMinutes <= 1) return "Just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
 export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlists, setPlaylists, onBack, canGoBack }: CollaborativePlaylistsHubProps) {
   const { profile } = useProfile();
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -31,6 +73,276 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
   const [friends, setFriends] = useState<Array<{ id: string; name: string; avatar: string }>>([]);
   const [isLoadingFriends, setIsLoadingFriends] = useState(false);
   const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
+
+  // Load playlists from DB so accepted invites show up as real collaborative lists.
+  useEffect(() => {
+    if (!profile?.id) {
+      setPlaylists([]);
+      return;
+    }
+
+    let active = true;
+
+    async function loadPlaylistsFromDb() {
+      const currentUserId = profile.id;
+
+      type BasePlaylist = {
+        id: string;
+        title: string;
+        description: string;
+        cover: string;
+        updatedAtRaw: string | null;
+      };
+
+      const basePlaylists = new Map<string, BasePlaylist>();
+      const contributorIdsByPlaylist = new Map<string, Set<string>>();
+
+      const ensureContributorSet = (playlistId: string) => {
+        const existing = contributorIdsByPlaylist.get(playlistId);
+        if (existing) return existing;
+        const created = new Set<string>();
+        contributorIdsByPlaylist.set(playlistId, created);
+        return created;
+      };
+
+      const ensureBasePlaylist = (playlistId: string, fallback?: Partial<BasePlaylist>) => {
+        const existing = basePlaylists.get(playlistId);
+        if (existing) return existing;
+
+        const created: BasePlaylist = {
+          id: playlistId,
+          title: fallback?.title || "Collaborative Playlist",
+          description: fallback?.description || "A collaborative playlist",
+          cover: fallback?.cover || `https://api.dicebear.com/7.x/shapes/svg?seed=${playlistId}`,
+          updatedAtRaw: fallback?.updatedAtRaw || null,
+        };
+        basePlaylists.set(playlistId, created);
+        return created;
+      };
+
+      const shouldQueryModernTables = !forceLegacyCollabMode;
+
+      const [modernPlaylistsRes, modernCollaboratorsRes, legacyPlaylistsRes, legacyContributorsRes] =
+        await Promise.all([
+          shouldQueryModernTables
+            ? supabase.from("collaborative_playlists").select("*").order("updated_at", { ascending: false })
+            : Promise.resolve({ data: null, error: null } as any),
+          shouldQueryModernTables
+            ? supabase.from("playlist_collaborators").select("playlist_id,user_id")
+            : Promise.resolve({ data: null, error: null } as any),
+          supabase.from("playlists").select("*").order("updated_at", { ascending: false }),
+          shouldQueryModernTables
+            ? supabase.from("playlist_contributors").select("playlist_id,user_id")
+            : Promise.resolve({ data: null, error: null } as any),
+        ]);
+
+      if (!modernPlaylistsRes.error && modernPlaylistsRes.data) {
+        for (const row of modernPlaylistsRes.data as any[]) {
+          const id = String(row.id || "");
+          if (!id) continue;
+
+          ensureBasePlaylist(id, {
+            title: row.title || row.name || "Collaborative Playlist",
+            description: row.description || "A collaborative playlist",
+            cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${id}`,
+            updatedAtRaw: row.updated_at || row.created_at || null,
+          });
+
+          if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
+          if (row.created_by) ensureContributorSet(id).add(String(row.created_by));
+        }
+      } else if (modernPlaylistsRes.error) {
+        warnOnceForPolicyRecursion(modernPlaylistsRes.error);
+        if (!isNonFatalReadError(modernPlaylistsRes.error)) {
+          console.error("Failed to load collaborative_playlists:", modernPlaylistsRes.error);
+        }
+      }
+
+      if (!modernCollaboratorsRes.error && modernCollaboratorsRes.data) {
+        for (const row of modernCollaboratorsRes.data as any[]) {
+          const playlistId = String(row.playlist_id || "");
+          const userId = String(row.user_id || "");
+          if (!playlistId || !userId) continue;
+
+          ensureBasePlaylist(playlistId);
+          ensureContributorSet(playlistId).add(userId);
+        }
+      } else if (modernCollaboratorsRes.error) {
+        warnOnceForPolicyRecursion(modernCollaboratorsRes.error);
+        if (!isNonFatalReadError(modernCollaboratorsRes.error)) {
+          console.error("Failed to load playlist_collaborators:", modernCollaboratorsRes.error);
+        }
+      }
+
+      if (!legacyPlaylistsRes.error && legacyPlaylistsRes.data) {
+        for (const row of legacyPlaylistsRes.data as any[]) {
+          const id = String(row.id || "");
+          if (!id) continue;
+
+          ensureBasePlaylist(id, {
+            title: row.title || row.name || "Collaborative Playlist",
+            description: row.description || "A collaborative playlist",
+            cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${id}`,
+            updatedAtRaw: row.updated_at || row.created_at || null,
+          });
+
+          if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
+          if (Array.isArray(row.collaborators)) {
+            for (const collaboratorId of row.collaborators) {
+              if (collaboratorId) ensureContributorSet(id).add(String(collaboratorId));
+            }
+          }
+        }
+      } else if (legacyPlaylistsRes.error) {
+        warnOnceForPolicyRecursion(legacyPlaylistsRes.error);
+        if (!isNonFatalReadError(legacyPlaylistsRes.error)) {
+          console.error("Failed to load playlists:", legacyPlaylistsRes.error);
+        }
+      }
+
+      if (!legacyContributorsRes.error && legacyContributorsRes.data) {
+        for (const row of legacyContributorsRes.data as any[]) {
+          const playlistId = String(row.playlist_id || "");
+          const userId = String(row.user_id || "");
+          if (!playlistId || !userId) continue;
+
+          ensureBasePlaylist(playlistId);
+          ensureContributorSet(playlistId).add(userId);
+        }
+      } else if (legacyContributorsRes.error) {
+        warnOnceForPolicyRecursion(legacyContributorsRes.error);
+        if (!isNonFatalReadError(legacyContributorsRes.error)) {
+          console.error("Failed to load playlist_contributors:", legacyContributorsRes.error);
+        }
+      }
+
+      // Only keep playlists where current user is a contributor/member.
+      const playlistIds = Array.from(basePlaylists.keys()).filter((id) =>
+        (contributorIdsByPlaylist.get(id) || new Set<string>()).has(currentUserId)
+      );
+
+      if (playlistIds.length === 0) {
+        if (active) setPlaylists([]);
+        return;
+      }
+
+      const [pendingInvitesRes, trackRowsRes] = await Promise.all([
+        supabase
+          .from("notifications")
+          .select("playlist_id")
+          .eq("type", "playlist_invite")
+          .eq("action_user_id", currentUserId)
+          .eq("is_read", false),
+        supabase.from("playlist_tracks").select("playlist_id").in("playlist_id", playlistIds),
+      ]);
+
+      const pendingByPlaylist = new Map<string, number>();
+      if (!pendingInvitesRes.error && pendingInvitesRes.data) {
+        for (const row of pendingInvitesRes.data as any[]) {
+          const playlistId = String(row.playlist_id || "");
+          if (!playlistId) continue;
+          pendingByPlaylist.set(playlistId, (pendingByPlaylist.get(playlistId) || 0) + 1);
+        }
+      }
+
+      const tracksByPlaylist = new Map<string, number>();
+      if (!trackRowsRes.error && trackRowsRes.data) {
+        for (const row of trackRowsRes.data as any[]) {
+          const playlistId = String(row.playlist_id || "");
+          if (!playlistId) continue;
+          tracksByPlaylist.set(playlistId, (tracksByPlaylist.get(playlistId) || 0) + 1);
+        }
+      }
+
+      const allContributorIds = Array.from(
+        new Set(
+          playlistIds.flatMap((id) => Array.from(contributorIdsByPlaylist.get(id) || new Set<string>()))
+        )
+      );
+
+      let profilesById = new Map<string, any>();
+      if (allContributorIds.length > 0) {
+        try {
+          const profileRows = await getProfiles(allContributorIds);
+          profilesById = new Map(profileRows.map((p) => [p.id, p]));
+        } catch (error) {
+          console.error("Failed to load collaborator profiles:", error);
+        }
+      }
+
+      const normalized = playlistIds
+        .map((id) => {
+          const base = basePlaylists.get(id)!;
+          const contributorIds = Array.from(contributorIdsByPlaylist.get(id) || new Set<string>());
+          const contributors = contributorIds.map((userId) => {
+            const contributorProfile = profilesById.get(userId);
+            return {
+              id: userId,
+              name:
+                contributorProfile?.display_name ||
+                contributorProfile?.username ||
+                (userId === currentUserId
+                  ? profile?.display_name || profile?.username || "You"
+                  : "Collaborator"),
+              avatar:
+                contributorProfile?.avatar_url ||
+                `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
+            };
+          });
+
+          return {
+            id: base.id,
+            title: base.title,
+            description: base.description,
+            cover: base.cover,
+            trackCount: tracksByPlaylist.get(id) || 0,
+            pendingInviteCount: pendingByPlaylist.get(id) || 0,
+            contributors:
+              contributors.length > 0
+                ? contributors
+                : [
+                    {
+                      id: currentUserId,
+                      name: profile?.display_name || profile?.username || "You",
+                      avatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUserId}`,
+                    },
+                  ],
+            lastUpdated: formatLastUpdated(base.updatedAtRaw),
+            moods: ["Collaborative", "Fresh", "New"],
+            updatedAtRaw: base.updatedAtRaw || new Date(0).toISOString(),
+          };
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAtRaw || 0).getTime() - new Date(a.updatedAtRaw || 0).getTime()
+        )
+        .map(({ updatedAtRaw, ...playlistData }) => playlistData);
+
+      if (active) {
+        setPlaylists(normalized);
+      }
+    }
+
+    loadPlaylistsFromDb();
+
+    const syncChannel = supabase
+      .channel(`collab_playlists_sync_${profile.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "playlist_collaborators" }, loadPlaylistsFromDb)
+      .on("postgres_changes", { event: "*", schema: "public", table: "playlist_contributors" }, loadPlaylistsFromDb)
+      .on("postgres_changes", { event: "*", schema: "public", table: "collaborative_playlists" }, loadPlaylistsFromDb)
+      .on("postgres_changes", { event: "*", schema: "public", table: "playlists" }, loadPlaylistsFromDb)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
+        loadPlaylistsFromDb
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(syncChannel);
+    };
+  }, [profile?.id, profile?.display_name, profile?.username, profile?.avatar_url, setPlaylists]);
 
   // Fetch invite candidates (mutual follows only)
   useEffect(() => {
@@ -78,82 +390,6 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       active = false;
     };
   }, [profile?.id]);
-
-  // Listen for invite responses and keep collaborator/pending counts in sync.
-  useEffect(() => {
-    if (!profile?.id) return;
-
-    const channel = supabase
-      .channel(`collab_invite_responses_${profile.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${profile.id}`,
-        },
-        (payload) => {
-          const n = payload.new as any;
-          const title = (n.title || "") as string;
-
-          const isInviteResponse =
-            n.type === "mention" &&
-            (title === "Invite accepted" || title === "Invite declined") &&
-            !!n.playlist_id;
-
-          if (!isInviteResponse) return;
-
-          const updated = playlists.map((playlist) => {
-            if (playlist.id !== n.playlist_id) return playlist;
-
-            const nextPending = Math.max((playlist.pendingInviteCount || 0) - 1, 0);
-            const base = {
-              ...playlist,
-              pendingInviteCount: nextPending,
-              lastUpdated: "Just now",
-            };
-
-            if (title !== "Invite accepted") {
-              return base;
-            }
-
-            if (!n.action_user_id) {
-              return base;
-            }
-
-            const alreadyContributor = (playlist.contributors || []).some(
-              (c: any) => c.id === n.action_user_id
-            );
-
-            if (alreadyContributor) {
-              return base;
-            }
-
-            return {
-              ...base,
-              contributors: [
-                ...(playlist.contributors || []),
-                {
-                  id: n.action_user_id,
-                  name: n.action_user_name || "Collaborator",
-                  avatar:
-                    n.action_user_avatar ||
-                    `https://api.dicebear.com/7.x/avataaars/svg?seed=${n.action_user_id}`,
-                },
-              ],
-            };
-          });
-
-          setPlaylists(updated);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [profile?.id, playlists, setPlaylists]);
 
   const toggleFriendSelection = (friendId: string) => {
     setSelectedFriends(prev =>
@@ -215,7 +451,10 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       const coverSeedUrl = `https://api.dicebear.com/7.x/shapes/svg?seed=${Date.now()}`;
       const generatedPlaylistId = crypto.randomUUID();
 
-      const createAttempts: Array<{ table: "collaborative_playlists" | "playlists"; payload: Record<string, unknown> }> = [
+      const modernCreateAttempts: Array<{
+        table: "collaborative_playlists";
+        payload: Record<string, unknown>;
+      }> = [
         {
           table: "collaborative_playlists",
           payload: {
@@ -248,6 +487,12 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             created_by: currentUserId,
           },
         },
+      ];
+
+      const legacyCreateAttempts: Array<{
+        table: "playlists";
+        payload: Record<string, unknown>;
+      }> = [
         {
           table: "playlists",
           payload: {
@@ -272,6 +517,13 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         },
       ];
 
+      const createAttempts: Array<{
+        table: "collaborative_playlists" | "playlists";
+        payload: Record<string, unknown>;
+      }> = forceLegacyCollabMode
+        ? [...legacyCreateAttempts, ...modernCreateAttempts]
+        : [...modernCreateAttempts, ...legacyCreateAttempts];
+
       let createdPlaylistId: string | null = null;
       const createErrors: string[] = [];
 
@@ -286,6 +538,10 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
           break;
         }
 
+        if (isPolicyRecursionError(playlistError)) {
+          forceLegacyCollabMode = true;
+        }
+
         createErrors.push(
           `${attempt.table}: ${playlistError.code || "ERR"} ${playlistError.message || "Unknown error"}`
         );
@@ -298,11 +554,18 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       playlistDbId = createdPlaylistId;
 
       if (createdInTable === "collaborative_playlists") {
+        let shouldMirrorToLegacyTable = false;
+
         // Try to backfill creator_id for schemas that support it.
-        await supabase
+        const { error: creatorBackfillError } = await supabase
           .from("collaborative_playlists")
           .update({ creator_id: currentUserId })
           .eq("id", playlistDbId);
+
+        if (isPolicyRecursionError(creatorBackfillError)) {
+          forceLegacyCollabMode = true;
+          shouldMirrorToLegacyTable = true;
+        }
 
         // Add creator as an initial contributor. Ignore failures if trigger already handled owner row.
         const { error: collaboratorInsertError } = await supabase.from("playlist_collaborators").upsert(
@@ -315,16 +578,44 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         );
 
         if (collaboratorInsertError) {
-          const { error: contributorInsertError } = await supabase.from("playlist_contributors").upsert(
+          if (isPolicyRecursionError(collaboratorInsertError)) {
+            forceLegacyCollabMode = true;
+            shouldMirrorToLegacyTable = true;
+          } else {
+            const { error: contributorInsertError } = await supabase.from("playlist_contributors").upsert(
+              {
+                playlist_id: playlistDbId,
+                user_id: currentUserId,
+              },
+              { onConflict: "playlist_id,user_id" }
+            );
+
+            if (contributorInsertError) {
+              if (isPolicyRecursionError(contributorInsertError)) {
+                forceLegacyCollabMode = true;
+                shouldMirrorToLegacyTable = true;
+              }
+              console.warn("Could not insert owner collaborator row:", collaboratorInsertError, contributorInsertError);
+            }
+          }
+        }
+
+        if (shouldMirrorToLegacyTable) {
+          const { error: legacyMirrorError } = await supabase.from("playlists").upsert(
             {
-              playlist_id: playlistDbId,
-              user_id: currentUserId,
+              id: playlistDbId,
+              name: playlistTitle,
+              description: playlistDescriptionText,
+              cover_image: coverSeedUrl,
+              creator_id: currentUserId,
+              collaborators: [currentUserId],
+              is_public: false,
             },
-            { onConflict: "playlist_id,user_id" }
+            { onConflict: "id" }
           );
 
-          if (contributorInsertError) {
-            console.warn("Could not insert owner collaborator row:", collaboratorInsertError, contributorInsertError);
+          if (legacyMirrorError) {
+            console.warn("Could not mirror collaborative playlist to legacy table:", legacyMirrorError);
           }
         }
       } else {

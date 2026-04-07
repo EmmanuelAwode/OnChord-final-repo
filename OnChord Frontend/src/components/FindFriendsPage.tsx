@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { motion } from "motion/react";
 import { useProfileSearch } from "../lib/useProfile";
-import { followUser, unfollowUser, isFollowing, getFollowers, blockUser, unblockUser, isBlocked } from "../lib/api/follows";
+import { followUser, unfollowUser, isFollowing, getFollowers, blockUser, unblockUser, hasBlockingRelationship } from "../lib/api/follows";
 import { getProfiles, type Profile } from "../lib/api/profiles";
 import { supabase } from "../lib/supabaseClient";
 import { toast } from "sonner";
@@ -148,6 +148,15 @@ export function FindFriendsPage({ onNavigate, onBack, canGoBack }: FindFriendsPa
   async function handleToggleFollow(userId: string) {
     try {
       const isCurrentlyFollowing = followingState[userId];
+      
+      if (!isCurrentlyFollowing) {
+        // Check for blocking relationships before allowing follow
+        const hasBlockingRels = await hasBlockingRelationship(userId);
+        if (hasBlockingRels) {
+          toast.error("You cannot follow this user due to block restrictions");
+          return;
+        }
+      }
       
       if (isCurrentlyFollowing) {
         await unfollowUser(userId);

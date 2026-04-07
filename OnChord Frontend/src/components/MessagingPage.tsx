@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useDirectMessages, type Conversation, type DirectMessage } from "../lib/useDirectMessages";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
+import { blockUser, unblockUser, hasBlockingRelationship } from "../lib/api/follows";
 import { searchAlbums } from "../lib/api/musicSearch";
 import { formatDateForDisplay } from "../lib/localeFormatting";
 
@@ -55,8 +56,11 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
     if (!targetUserId || !userId || dm.conversations.length === 0) return;
     
     // Find existing conversation or create new one
-    const existingConv = dm.conversations.find(c => 
-      c.other_user?.id === targetUserId || c.participants?.includes(targetUserId)
+    const existingConv = dm.conversations.find(
+      (c) =>
+        c.other_user?.id === targetUserId ||
+        c.participant_1 === targetUserId ||
+        c.participant_2 === targetUserId
     );
     
     if (existingConv) {
@@ -87,6 +91,9 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isConversationBlocked, setIsConversationBlocked] = useState(false);
+  const [isCheckingBlockStatus, setIsCheckingBlockStatus] = useState(false);
+  const [isBlockActionLoading, setIsBlockActionLoading] = useState(false);
   const [trackSearchResults, setTrackSearchResults] = useState<Album[]>([]);
   const [isSearchingTracks, setIsSearchingTracks] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -190,6 +197,37 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
     return conv.other_user;
   };
 
+  // Keep block status in sync with the currently selected conversation participant.
+  useEffect(() => {
+    const otherUserId = selectedConversation?.other_user?.id;
+
+    if (!userId || !otherUserId || otherUserId === userId) {
+      setIsConversationBlocked(false);
+      return;
+    }
+
+    let active = true;
+
+    async function loadBlockStatus() {
+      setIsCheckingBlockStatus(true);
+      try {
+        const blocked = await hasBlockingRelationship(otherUserId);
+        if (active) setIsConversationBlocked(blocked);
+      } catch (error) {
+        console.error("Failed to load message block status:", error);
+        if (active) setIsConversationBlocked(false);
+      } finally {
+        if (active) setIsCheckingBlockStatus(false);
+      }
+    }
+
+    loadBlockStatus();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedConversation?.id, selectedConversation?.other_user?.id, userId]);
+
   // Format timestamp
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -217,6 +255,12 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
 
   // Start a new conversation with a user
   const handleStartConversation = async (otherUserId: string) => {
+    const currentlyBlocked = await hasBlockingRelationship(otherUserId);
+    if (currentlyBlocked) {
+      toast.error("Unblock this user before starting a conversation");
+      return;
+    }
+
     const conversationId = await dm.getOrCreateConversation(otherUserId);
     if (conversationId) {
       await dm.fetchConversations();
@@ -265,6 +309,11 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
   ];
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isConversationBlocked) {
+      toast.error("Unblock this user before sending media");
+      return;
+    }
+
     const file = e.target.files?.[0];
     if (file) {
       if (!file.type.startsWith('image/')) {
@@ -288,6 +337,11 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
 
   const handleSendMessage = async () => {
     if (!selectedConversation || (!messageInput.trim() && !selectedImage)) return;
+
+    if (isConversationBlocked) {
+      toast.error("Unblock this user before sending messages");
+      return;
+    }
     
     setIsSending(true);
     const success = await dm.sendMessage(
@@ -308,6 +362,11 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
 
   const handleSendGif = async (gifUrl: string) => {
     if (!selectedConversation) return;
+
+    if (isConversationBlocked) {
+      toast.error("Unblock this user before sending messages");
+      return;
+    }
     
     const success = await dm.sendMessage(
       selectedConversation.id,
@@ -327,6 +386,11 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
 
   const handleShareTrack = async (album: Album) => {
     if (!selectedConversation) return;
+
+    if (isConversationBlocked) {
+      toast.error("Unblock this user before sharing tracks");
+      return;
+    }
     
     const success = await dm.sendMessage(
       selectedConversation.id,
@@ -367,6 +431,46 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
       input.focus();
       input.setSelectionRange(nextCaret, nextCaret);
     });
+  };
+
+  const handleToggleConversationBlock = async () => {
+    if (!selectedConversation) return;
+
+    const otherUser = getOtherParticipant(selectedConversation);
+    if (!otherUser?.id) {
+      toast.error("Could not determine user to block");
+      return;
+    }
+
+    setIsBlockActionLoading(true);
+    try {
+      if (isConversationBlocked) {
+        await unblockUser(otherUser.id);
+        setIsConversationBlocked(false);
+        toast.success(`Unblocked ${otherUser.display_name || otherUser.username || "user"}`);
+      } else {
+        const confirmed = window.confirm(
+          `Block ${otherUser.display_name || otherUser.username || "this user"}? You won't be able to message them until you unblock.`
+        );
+        if (!confirmed) return;
+
+        await blockUser(otherUser.id);
+        setIsConversationBlocked(true);
+        setMessageInput("");
+        setSelectedImage(null);
+        toast.success(`Blocked ${otherUser.display_name || otherUser.username || "user"}`);
+      }
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        setIsConversationBlocked(true);
+        toast.info("This user is already blocked");
+      } else {
+        console.error("Failed to toggle block in messaging:", error);
+        toast.error("Failed to update block status");
+      }
+    } finally {
+      setIsBlockActionLoading(false);
+    }
   };
 
   const visibleEmojis = emojiGroups[emojiCategory].filter((emoji) => {
@@ -534,7 +638,9 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                   </Avatar>
                   <div>
                     <p className="text-foreground text-sm md:text-base font-medium leading-tight">{getOtherParticipant(selectedConversation)?.display_name || "Unknown User"}</p>
-                    <p className="text-xs text-muted-foreground">Active now</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isConversationBlocked ? "Blocked" : "Active now"}
+                    </p>
                   </div>
                 </div>
                 <DropdownMenu>
@@ -575,9 +681,17 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                       <Trash2 className="w-4 h-4 mr-2" />
                       Clear Chat
                     </DropdownMenuItem>
-                    <DropdownMenuItem variant="destructive" onClick={() => toast.info("Block feature coming soon")}>
+                    <DropdownMenuItem
+                      variant={isConversationBlocked ? "default" : "destructive"}
+                      disabled={isCheckingBlockStatus || isBlockActionLoading}
+                      onClick={handleToggleConversationBlock}
+                    >
                       <Ban className="w-4 h-4 mr-2" />
-                      Block User
+                      {isBlockActionLoading
+                        ? "Updating..."
+                        : isConversationBlocked
+                        ? "Unblock User"
+                        : "Block User"}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -659,6 +773,12 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
               {/* Input — fixed at bottom */}
               <div className="px-3 py-3 md:px-4 border-t border-border/80 flex-shrink-0">
                 <div className="w-full max-w-[760px] mx-auto">
+                  {isConversationBlocked && (
+                    <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      You blocked this user. Unblock them from the menu to send messages.
+                    </div>
+                  )}
+
                   {selectedImage && (
                     <div className="mb-3 relative flex justify-center">
                       <div className="relative">
@@ -676,12 +796,19 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                   )}
                   <div className="flex items-center h-14 gap-2">
                     <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" id="message-image-upload" />
-                    <Button variant="outline" size="icon" className="border-border flex-shrink-0 w-10 h-10" onClick={() => document.getElementById('message-image-upload')?.click()} title="Add Image">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="border-border flex-shrink-0 w-10 h-10"
+                      disabled={isConversationBlocked}
+                      onClick={() => document.getElementById('message-image-upload')?.click()}
+                      title="Add Image"
+                    >
                       <Image className="w-4 h-4" />
                     </Button>
                     <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" size="icon" className="border-border flex-shrink-0 w-10 h-10" title="Add Emoji">
+                        <Button variant="outline" size="icon" className="border-border flex-shrink-0 w-10 h-10" title="Add Emoji" disabled={isConversationBlocked}>
                           <span className="text-base leading-none">😀</span>
                         </Button>
                       </PopoverTrigger>
@@ -770,10 +897,24 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                         </div>
                       </PopoverContent>
                     </Popover>
-                    <Button variant="outline" size="icon" className="border-border flex-shrink-0 w-10 h-10" onClick={() => setShowGifModal(true)} title="Add GIF">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="border-border flex-shrink-0 w-10 h-10"
+                      disabled={isConversationBlocked}
+                      onClick={() => setShowGifModal(true)}
+                      title="Add GIF"
+                    >
                       <Smile className="w-4 h-4" />
                     </Button>
-                    <Button variant="outline" size="icon" className="border-border flex-shrink-0 w-10 h-10" onClick={() => setShowShareTrackModal(true)} title="Share Track">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="border-border flex-shrink-0 w-10 h-10"
+                      disabled={isConversationBlocked}
+                      onClick={() => setShowShareTrackModal(true)}
+                      title="Share Track"
+                    >
                       <Share2 className="w-4 h-4" />
                     </Button>
                     <span className="h-6 w-px bg-border/70" aria-hidden="true" />
@@ -782,16 +923,17 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                       type="text"
                       placeholder="Message..."
                       value={messageInput}
+                      disabled={isConversationBlocked}
                       onChange={(e) => setMessageInput(e.target.value)}
                       className="flex-1 h-10 bg-muted border-0 text-foreground text-sm md:text-base"
                       onKeyPress={(e) => {
-                        if (e.key === "Enter" && (messageInput.trim() || selectedImage)) handleSendMessage();
+                        if (!isConversationBlocked && e.key === "Enter" && (messageInput.trim() || selectedImage)) handleSendMessage();
                       }}
                     />
                     <Button
                       className="bg-primary hover:bg-primary/90 text-primary-foreground flex-shrink-0 w-10 h-10 p-0"
                       onClick={handleSendMessage}
-                      disabled={isSending || (!messageInput.trim() && !selectedImage)}
+                      disabled={isSending || isConversationBlocked || (!messageInput.trim() && !selectedImage)}
                     >
                       {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     </Button>

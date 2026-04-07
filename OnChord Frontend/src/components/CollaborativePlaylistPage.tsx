@@ -15,6 +15,8 @@ import { getMutualFollows } from "../lib/api/follows";
 import { getProfiles } from "../lib/api/profiles";
 import { supabase } from "../lib/supabaseClient";
 
+const isPolicyRecursionError = (error: any): boolean => !!error && error.code === "42P17";
+
 interface Album {
   id: string;
   title: string;
@@ -457,8 +459,24 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       );
 
       if (isUuid) {
-        const { error } = await supabase.from("collaborative_playlists").delete().eq("id", playlist.id);
-        if (error) throw error;
+        let deletedRemotely = false;
+
+        const { error: legacyDeleteError } = await supabase.from("playlists").delete().eq("id", playlist.id);
+        if (!legacyDeleteError) {
+          deletedRemotely = true;
+        }
+
+        const { error: modernDeleteError } = await supabase
+          .from("collaborative_playlists")
+          .delete()
+          .eq("id", playlist.id);
+        if (!modernDeleteError) {
+          deletedRemotely = true;
+        }
+
+        if (!deletedRemotely) {
+          throw modernDeleteError || legacyDeleteError || new Error("Failed to delete playlist");
+        }
       }
 
       setPlaylists(playlists.filter((p) => p.id !== playlist.id));
@@ -467,7 +485,11 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       else onNavigate?.("your-space-collab");
     } catch (error) {
       console.error("Failed to delete collaborative playlist:", error);
-      toast.error("Failed to delete playlist. You may not have permission.");
+      if (isPolicyRecursionError(error)) {
+        toast.error("Delete blocked by DB policy recursion. Apply migration 021_fix_collab_policy_recursion.sql.");
+      } else {
+        toast.error("Failed to delete playlist. You may not have permission.");
+      }
     } finally {
       setIsDeletingPlaylist(false);
     }

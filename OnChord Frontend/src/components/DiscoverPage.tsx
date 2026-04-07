@@ -461,17 +461,20 @@ export function DiscoverPage({ onNavigate, onOpenAlbum, onOpenReviewModal }: Dis
                 </p>
               </Card>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {(topTracks.length > 0 ? topTracks : recentlyPlayed).map((track: any) => (
-                  <SpotifyTrackCard
-                    key={track.id}
-                    track={track}
-                    onAlbumClick={handleAlbumClick}
-                    onReview={handleReview}
-                    onFavourite={handleFavourite}
-                    isFav={isSongFavourite(track.id)}
-                    onTrackClick={handleTrackClick}
-                  />
-                ))}
+                {(topTracks.length > 0 ? topTracks : recentlyPlayed).map((item: any, idx: number) => {
+                  const track = item.track || item;
+                  return (
+                    <SpotifyTrackCard
+                      key={`${track.id}-${idx}`}
+                      track={track}
+                      onAlbumClick={handleAlbumClick}
+                      onReview={handleReview}
+                      onFavourite={handleFavourite}
+                      isFav={isSongFavourite(track.id)}
+                      onTrackClick={handleTrackClick}
+                    />
+                  );
+                })}
               </div>
             </>
           )

@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { checkMlServiceHealth, getEnhancedTasteSimilarity, type MlServiceHealth } from "../lib/api/mlService";
 import { type Profile } from "../lib/api/profiles";
 import { getUserMusicData, type UserMusicData } from "../lib/api/tasteMatching";
-import { blockUser, unblockUser, isBlocked } from "../lib/api/follows";
+import { blockUser, unblockUser, hasBlockingRelationship } from "../lib/api/follows";
 
 interface TasteMatchingPageProps {
   onNavigate?: (page: string) => void;
@@ -227,6 +227,15 @@ export function TasteMatchingPage({ onNavigate }: TasteMatchingPageProps) {
     const wasFollowing = isFollowing(userId);
     
     try {
+      if (!wasFollowing) {
+        // Check for blocking relationships before allowing follow
+        const hasBlockingRels = await hasBlockingRelationship(userId);
+        if (hasBlockingRels) {
+          toast.error("You cannot connect with this user due to block restrictions");
+          return;
+        }
+      }
+      
       await toggleFollow(userId);
       
       if (wasFollowing) {

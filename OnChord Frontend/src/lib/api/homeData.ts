@@ -101,7 +101,7 @@ async function getTopArtistsForPersonalization(limit: number = 15): Promise<any[
 
       const topArtistsResponse = await Promise.race([
         getUserTopArtists("medium_term", Math.max(limit, 15)),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 15000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 20000)),
       ]);
 
       const topArtists = (topArtistsResponse as any)?.items || [];

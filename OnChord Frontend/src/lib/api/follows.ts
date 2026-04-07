@@ -256,3 +256,37 @@ export async function isBlocked(userId: string): Promise<boolean> {
 
   return !!data;
 }
+
+/**
+ * Check if current user is blocked by another user (they blocked you)
+ */
+export async function isBlockedBy(userId: string): Promise<boolean> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) return false;
+
+  const { data, error } = await supabase
+    .from("blocks")
+    .select("id")
+    .eq("blocker_id", userId)
+    .eq("blocked_id", session.session.user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error checking if blocked by user:", error);
+    return false;
+  }
+
+  return !!data;
+}
+
+/**
+ * Check if there is any block relationship in either direction
+ */
+export async function hasBlockingRelationship(userId: string): Promise<boolean> {
+  const [iBlockedThem, theyBlockedMe] = await Promise.all([
+    isBlocked(userId),
+    isBlockedBy(userId),
+  ]);
+
+  return iBlockedThem || theyBlockedMe;
+}

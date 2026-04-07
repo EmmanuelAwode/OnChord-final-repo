@@ -14,6 +14,8 @@ import { supabase } from '../lib/supabaseClient';
 import { isMutualFollow } from '../lib/api/follows';
 import { toast } from 'sonner';
 
+const isPolicyRecursionError = (error: any): boolean => !!error && error.code === '42P17';
+
 export default function NotificationsPanel() {
   const {
     notifications,
@@ -45,29 +47,32 @@ export default function NotificationsPanel() {
 
       let playlistTitle = 'this playlist';
       if (notification.playlistId) {
-        const { data: playlistRowByTitle } = await supabase
-          .from('collaborative_playlists')
-          .select('title')
+        const { data: legacyPlaylistRow } = await supabase
+          .from('playlists')
+          .select('name')
           .eq('id', notification.playlistId)
           .maybeSingle();
 
-        if (playlistRowByTitle?.title) {
-          playlistTitle = playlistRowByTitle.title;
+        if (legacyPlaylistRow?.name) {
+          playlistTitle = legacyPlaylistRow.name;
         } else {
-          const { data: playlistRowByName } = await supabase
+          const { data: playlistRowByTitle, error: titleLookupError } = await supabase
             .from('collaborative_playlists')
-            .select('name')
+            .select('title')
             .eq('id', notification.playlistId)
             .maybeSingle();
-          if (playlistRowByName?.name) {
-            playlistTitle = playlistRowByName.name;
-          } else {
-            const { data: legacyPlaylistRow } = await supabase
-              .from('playlists')
+
+          if (!titleLookupError && playlistRowByTitle?.title) {
+            playlistTitle = playlistRowByTitle.title;
+          } else if (!isPolicyRecursionError(titleLookupError)) {
+            const { data: playlistRowByName } = await supabase
+              .from('collaborative_playlists')
               .select('name')
               .eq('id', notification.playlistId)
               .maybeSingle();
-            playlistTitle = legacyPlaylistRow?.name || playlistTitle;
+            if (playlistRowByName?.name) {
+              playlistTitle = playlistRowByName.name;
+            }
           }
         }
       }
@@ -89,43 +94,51 @@ export default function NotificationsPanel() {
           return;
         }
 
-        const { error: contributorError } = await supabase
-          .from('playlist_collaborators')
-          .upsert(
-            {
-              playlist_id: notification.playlistId,
-              user_id: currentUserId,
-              role: 'contributor',
-            },
-            { onConflict: 'playlist_id,user_id' }
-          );
+        // Legacy-first path: avoids recursive policy tables while migration is pending.
+        let acceptedViaLegacyTable = false;
 
-        if (contributorError) {
-          // Legacy fallback: playlists table with collaborators array.
-          let acceptedViaLegacyTable = false;
+        const { data: legacyPlaylistRow, error: legacyPlaylistError } = await supabase
+          .from('playlists')
+          .select('id, collaborators')
+          .eq('id', notification.playlistId)
+          .maybeSingle();
 
-          const { data: legacyPlaylistRow, error: legacyPlaylistError } = await supabase
+        if (!legacyPlaylistError && legacyPlaylistRow?.id) {
+          const existingCollaborators: string[] = Array.isArray(legacyPlaylistRow.collaborators)
+            ? legacyPlaylistRow.collaborators
+            : [];
+
+          const updatedCollaborators = Array.from(new Set([...existingCollaborators, currentUserId]));
+
+          const { error: legacyUpdateError } = await supabase
             .from('playlists')
-            .select('id, collaborators')
-            .eq('id', notification.playlistId)
-            .maybeSingle();
+            .update({ collaborators: updatedCollaborators })
+            .eq('id', notification.playlistId);
 
-          if (!legacyPlaylistError && legacyPlaylistRow?.id) {
-            const existingCollaborators: string[] = Array.isArray(legacyPlaylistRow.collaborators)
-              ? legacyPlaylistRow.collaborators
-              : [];
-
-            const updatedCollaborators = Array.from(new Set([...existingCollaborators, currentUserId]));
-
-            const { error: legacyUpdateError } = await supabase
-              .from('playlists')
-              .update({ collaborators: updatedCollaborators })
-              .eq('id', notification.playlistId);
-
-            acceptedViaLegacyTable = !legacyUpdateError;
+          if (legacyUpdateError) {
+            throw legacyUpdateError;
           }
 
-          if (!acceptedViaLegacyTable) {
+          acceptedViaLegacyTable = true;
+        }
+
+        if (!acceptedViaLegacyTable) {
+          const { error: contributorError } = await supabase
+            .from('playlist_collaborators')
+            .upsert(
+              {
+                playlist_id: notification.playlistId,
+                user_id: currentUserId,
+                role: 'contributor',
+              },
+              { onConflict: 'playlist_id,user_id' }
+            );
+
+          if (contributorError) {
+            if (isPolicyRecursionError(contributorError)) {
+              throw contributorError;
+            }
+
             const { error: contributorsTableError } = await supabase
               .from('playlist_contributors')
               .upsert(
@@ -172,7 +185,11 @@ export default function NotificationsPanel() {
       toast.success(decision === 'accept' ? 'Joined playlist' : 'Invite declined');
     } catch (error) {
       console.error('Failed to respond to playlist invite:', error);
-      toast.error('Could not process invite response');
+      if (isPolicyRecursionError(error)) {
+        toast.error('Invite action blocked by DB policy recursion. Apply migration 021_fix_collab_policy_recursion.sql.');
+      } else {
+        toast.error('Could not process invite response');
+      }
     }
   };
 

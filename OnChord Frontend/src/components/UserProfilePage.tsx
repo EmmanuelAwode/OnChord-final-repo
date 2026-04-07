@@ -3,12 +3,11 @@ import { handleImageError } from "./ui/utils";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Star, Heart, MessageCircle, UserPlus, UserMinus, Users, Music2, MoreVertical, Ban } from "lucide-react";
+import { Star, UserPlus, UserMinus, Users, Music2, Ban } from "lucide-react";
 import { useState, useEffect } from "react";
 import { BackButton } from "./BackButton";
 import { useProfileById } from "../lib/useProfile";
-import { getFollowerCount, getFollowingCount, followUser, unfollowUser, isFollowing as checkIsFollowing, getFollowers, getFollowing, blockUser, unblockUser, isBlocked } from "../lib/api/follows";
+import { getFollowerCount, getFollowingCount, followUser, unfollowUser, isFollowing as checkIsFollowing, getFollowers, getFollowing, blockUser, unblockUser, isBlocked, isBlockedBy, hasBlockingRelationship } from "../lib/api/follows";
 import { getProfiles, type Profile } from "../lib/api/profiles";
 import { getUserReviews } from "../lib/api/reviews";
 import { supabase } from "../lib/supabaseClient";
@@ -73,7 +72,7 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
                 .maybeSingle();
               return !!data;
             })(),
-            isBlocked(userId),
+            hasBlockingRelationship(userId),
           ]);
           setIsCurrentlyFollowing(iFollow);
           setFollowsYou(theyFollowMe);
@@ -89,7 +88,7 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
               .from("follows")
               .select("follower_id")
               .eq("following_id", userId);
-            return data?.map(f => f.follower_id) || [];
+            return ((data as Array<{ follower_id: string }> | null) || []).map((f) => f.follower_id);
           })(),
           // Get who this user follows
           (async () => {
@@ -97,7 +96,7 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
               .from("follows")
               .select("following_id")
               .eq("follower_id", userId);
-            return data?.map(f => f.following_id) || [];
+            return ((data as Array<{ following_id: string }> | null) || []).map((f) => f.following_id);
           })(),
         ]);
 
@@ -129,6 +128,11 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
   }, [userId]);
 
   async function handleToggleFollow() {
+    if (isUserBlocked) {
+      toast.error("Unblock this user before following");
+      return;
+    }
+
     setFollowLoading(true);
     try {
       if (isCurrentlyFollowing) {
@@ -160,6 +164,17 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
       } else {
         await blockUser(userId);
         setIsUserBlocked(true);
+
+        if (isCurrentlyFollowing) {
+          try {
+            await unfollowUser(userId);
+            setIsCurrentlyFollowing(false);
+            setFollowersCount((prev) => Math.max(0, prev - 1));
+          } catch (unfollowError) {
+            console.warn("Could not unfollow user after block:", unfollowError);
+          }
+        }
+
         toast.success(`Blocked ${profile?.display_name || "user"}`);
       }
     } catch (error) {
@@ -264,22 +279,37 @@ export function UserProfilePage({ userId, onNavigate, onOpenAlbum, onBack, canGo
             </Badge>
           )}
 
-          {/* Follow/Edit Button - Full Width */}
+          {/* Follow/Edit + Block Actions */}
           <div className="w-full max-w-xs">
             {!isOwnProfile && (
-              <Button 
-                onClick={handleToggleFollow} 
-                variant="default"
-                size="lg"
-                className="w-full text-lg font-semibold py-6 bg-primary hover:bg-primary/90"
-                disabled={followLoading}
-              >
-                {isCurrentlyFollowing ? (
-                  <><UserMinus className="w-5 h-5 mr-2" />Unfollow</>
-                ) : (
-                  <><UserPlus className="w-5 h-5 mr-2" />{followsYou ? "Follow Back" : "Follow"}</>
-                )}
-              </Button>
+              <div className="space-y-2">
+                <Button 
+                  onClick={handleToggleFollow} 
+                  variant={isUserBlocked ? "outline" : "default"}
+                  size="lg"
+                  className="w-full text-lg font-semibold py-6"
+                  disabled={followLoading || blockLoading || isUserBlocked}
+                >
+                  {isUserBlocked ? (
+                    <><Ban className="w-5 h-5 mr-2" />Blocked</>
+                  ) : isCurrentlyFollowing ? (
+                    <><UserMinus className="w-5 h-5 mr-2" />Unfollow</>
+                  ) : (
+                    <><UserPlus className="w-5 h-5 mr-2" />{followsYou ? "Follow Back" : "Follow"}</>
+                  )}
+                </Button>
+
+                <Button
+                  onClick={handleToggleBlock}
+                  variant={isUserBlocked ? "secondary" : "destructive"}
+                  size="lg"
+                  className="w-full text-lg font-semibold py-6"
+                  disabled={blockLoading || followLoading}
+                >
+                  <Ban className="w-5 h-5 mr-2" />
+                  {isUserBlocked ? "Unblock User" : "Block User"}
+                </Button>
+              </div>
             )}
             {isOwnProfile && (
               <Button 
