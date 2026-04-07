@@ -20,6 +20,7 @@ const SPOTIFY_SCOPES = [
 let cachedAccessToken: string | null = null;
 let cachedTokenExpiry: number = 0;
 let refreshBlockedUntil = 0;
+let refreshInFlight: Promise<string> | null = null;
 
 // ============================================
 // PKCE Helpers
@@ -333,6 +334,10 @@ export async function getSpotifyAccessToken(): Promise<string> {
     throw new Error("Spotify is disconnected. Reconnect in Settings to continue.");
   }
 
+  if (refreshInFlight) {
+    return refreshInFlight;
+  }
+
   if (refreshBlockedUntil > Date.now()) {
     throw new Error("Spotify session expired. Please reconnect your Spotify account.");
   }
@@ -367,7 +372,11 @@ export async function getSpotifyAccessToken(): Promise<string> {
   }
 
   // Token expired — refresh it using Supabase Edge Function
-  return refreshAccessToken(connection.refresh_token ?? "");
+  refreshInFlight = refreshAccessToken(connection.refresh_token ?? "").finally(() => {
+    refreshInFlight = null;
+  });
+
+  return refreshInFlight;
 }
 
 /**

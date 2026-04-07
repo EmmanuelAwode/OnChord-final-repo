@@ -133,6 +133,16 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
 
   // Load personalized releases and concerts
   useEffect(() => {
+    if (!currentUserId) {
+      setPersonalizedReleases([]);
+      setPersonalizedConcerts([]);
+      setLoadingReleases(false);
+      setLoadingConcerts(false);
+      return;
+    }
+
+    let isCancelled = false;
+
     async function loadPersonalizedData() {
       // Create timeout promise
       const timeoutPromise = (ms: number) => new Promise((_, reject) => 
@@ -146,15 +156,21 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
         timeoutPromise(40000) // 40 seconds: accounts for 10 artists × 8s timeout + delays
       ])
         .then(releases => {
-          setPersonalizedReleases(releases as typeof personalizedReleases);
+          if (!isCancelled) {
+            setPersonalizedReleases(releases as typeof personalizedReleases);
+          }
         })
         .catch(err => {
           console.error("Failed to load personalized releases:", err.message);
           // Set fallback data on timeout or error
-          setPersonalizedReleases([]);
+          if (!isCancelled) {
+            setPersonalizedReleases([]);
+          }
         })
         .finally(() => {
-          setLoadingReleases(false);
+          if (!isCancelled) {
+            setLoadingReleases(false);
+          }
         });
 
       // Load concerts in parallel with timeout (Ticketmaster can be slow with multiple artists)
@@ -164,18 +180,29 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
         timeoutPromise(120000) // 120 seconds: accounts for 10+ artists + Supabase queries + Ticketmaster rate limiting
       ])
         .then(concerts => {
-          setPersonalizedConcerts(concerts as typeof personalizedConcerts);
+          if (!isCancelled) {
+            setPersonalizedConcerts(concerts as typeof personalizedConcerts);
+          }
         })
         .catch(err => {
           console.error("Failed to load personalized concerts:", err.message);
           // Set fallback data on timeout or error
-          setPersonalizedConcerts([]);
+          if (!isCancelled) {
+            setPersonalizedConcerts([]);
+          }
         })
         .finally(() => {
-          setLoadingConcerts(false);
+          if (!isCancelled) {
+            setLoadingConcerts(false);
+          }
         });
     }
+
     loadPersonalizedData();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [currentUserId]);
 
   const displayName = realDisplayName || username || "Music Lover";

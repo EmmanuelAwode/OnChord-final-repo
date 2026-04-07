@@ -39,6 +39,10 @@ const releasesCache: { data: PersonalizedRelease[] | null; timestamp: number } =
   data: null,
   timestamp: 0,
 };
+const concertsCache: { data: PersonalizedEvent[] | null; timestamp: number } = {
+  data: null,
+  timestamp: 0,
+};
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Spotify API helper for fetching with token
@@ -56,6 +60,73 @@ async function delay(ms: number): Promise<void> {
 
 // Track ongoing requests to prevent duplicate calls
 let isLoadingReleases = false;
+let isLoadingConcerts = false;
+let topArtistsInFlight: Promise<any[]> | null = null;
+const topArtistsCache: { data: any[] | null; timestamp: number } = {
+  data: null,
+  timestamp: 0,
+};
+let spotifyReconnectRequired = false;
+let hasLoggedReconnectRequirement = false;
+
+function isSpotifyReconnectError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+  return (
+    message.includes("revoked") ||
+    message.includes("invalid_grant") ||
+    message.includes("spotify is disconnected") ||
+    message.includes("reconnect your spotify account") ||
+    message.includes("session expired")
+  );
+}
+
+async function getTopArtistsForPersonalization(limit: number = 15): Promise<any[]> {
+  if (spotifyReconnectRequired) return [];
+
+  const now = Date.now();
+  if (topArtistsCache.data && now - topArtistsCache.timestamp < CACHE_DURATION) {
+    return topArtistsCache.data.slice(0, limit);
+  }
+
+  if (topArtistsInFlight) {
+    const inFlightResult = await topArtistsInFlight;
+    return inFlightResult.slice(0, limit);
+  }
+
+  topArtistsInFlight = (async () => {
+    try {
+      if (!await isSpotifyConnected()) {
+        return [];
+      }
+
+      const topArtistsResponse = await Promise.race([
+        getUserTopArtists("medium_term", Math.max(limit, 15)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 15000)),
+      ]);
+
+      const topArtists = (topArtistsResponse as any)?.items || [];
+      topArtistsCache.data = topArtists;
+      topArtistsCache.timestamp = Date.now();
+      return topArtists;
+    } catch (err) {
+      if (isSpotifyReconnectError(err)) {
+        spotifyReconnectRequired = true;
+        if (!hasLoggedReconnectRequirement) {
+          console.warn("Spotify session error detected. Personalization will pause until Spotify is reconnected.");
+          hasLoggedReconnectRequirement = true;
+        }
+      } else {
+        console.error("Failed to get Spotify top artists:", err);
+      }
+      return [];
+    } finally {
+      topArtistsInFlight = null;
+    }
+  })();
+
+  const artists = await topArtistsInFlight;
+  return artists.slice(0, limit);
+}
 
 /**
  * Get new releases from the user's top artists
@@ -81,35 +152,7 @@ export async function getPersonalizedNewReleases(limit: number = 4): Promise<Per
 
     isLoadingReleases = true;
 
-    // Check if Spotify is connected
-    if (!await isSpotifyConnected()) {
-      isLoadingReleases = false;
-      return getFallbackReleases();
-    }
-
-    // Get user's top artists with timeout
-    let topArtists: any[] = [];
-    try {
-      const topArtistsResponse = await Promise.race([
-        getUserTopArtists("medium_term", 10),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000))
-      ]);
-      topArtists = topArtistsResponse?.items || [];
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      // Check if it's a Spotify session error
-      const isSpotifySessionError = errorMsg.includes('revoked') || 
-                                   errorMsg.includes('expired') || 
-                                   errorMsg.includes('invalid_grant');
-      
-      if (isSpotifySessionError) {
-        console.error("Spotify session error - user needs to reconnect:", errorMsg);
-      } else {
-        console.error("Failed to get top artists:", err);
-      }
-      isLoadingReleases = false;
-      return getFallbackReleases();
-    }
+    const topArtists = await getTopArtistsForPersonalization(10);
 
     if (topArtists.length === 0) {
       isLoadingReleases = false;
@@ -267,19 +310,26 @@ async function getFallbackReleases(): Promise<PersonalizedRelease[]> {
  */
 export async function getPersonalizedConcerts(limit: number = 4): Promise<PersonalizedEvent[]> {
   try {
+    if (isLoadingConcerts) {
+      await delay(100);
+      if (concertsCache.data) {
+        return concertsCache.data.slice(0, limit);
+      }
+    }
+
+    const now = Date.now();
+    if (concertsCache.data && (now - concertsCache.timestamp) < CACHE_DURATION) {
+      return concertsCache.data.slice(0, limit);
+    }
+
+    isLoadingConcerts = true;
+
     // Get artist names from multiple sources
     const artistNames: string[] = [];
 
-    // 1. Try to get from Spotify top artists
-    if (await isSpotifyConnected()) {
-      try {
-        const topArtistsResponse = await getUserTopArtists("medium_term", 15);
-        const topArtists = topArtistsResponse?.items || [];
-        artistNames.push(...topArtists.map((a: any) => a.name));
-      } catch (err) {
-        console.error("Failed to get Spotify top artists:", err);
-      }
-    }
+    // 1. Try to get from Spotify top artists (shared request/caching)
+    const topArtists = await getTopArtistsForPersonalization(15);
+    artistNames.push(...topArtists.map((a: any) => a.name));
 
     // 2. Also check user's reviews and favorites for artist names
     try {
@@ -341,10 +391,15 @@ export async function getPersonalizedConcerts(limit: number = 4): Promise<Person
       return getFallbackConcerts();
     }
 
+    concertsCache.data = personalizedEvents;
+    concertsCache.timestamp = Date.now();
+
     return personalizedEvents;
   } catch (error) {
     console.error("Failed to get personalized concerts:", error);
     return getFallbackConcerts();
+  } finally {
+    isLoadingConcerts = false;
   }
 }
 
