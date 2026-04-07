@@ -662,7 +662,7 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                   {selectedImage && (
                     <div className="mb-3 relative flex justify-center">
                       <div className="relative">
-                        <img src={selectedImage} alt="Selected" className="max-w-sm max-h-96 rounded-lg border-2 border-primary object-cover" />
+                        <img src={selectedImage} alt="Selected" className="max-w-xs sm:max-w-sm max-h-64 sm:max-h-96 rounded-lg border-2 border-primary object-cover" />
                         <Button
                           size="sm"
                           variant="ghost"
