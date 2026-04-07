@@ -199,6 +199,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
     setIsCreatingPlaylist(true);
 
     let playlistDbId: string | null = null;
+    let createdInTable: "collaborative_playlists" | "playlists" = "collaborative_playlists";
 
     try {
       const { data: session } = await supabase.auth.getSession();
@@ -212,78 +213,138 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       // Create playlist in DB (supports legacy and newer schema variants).
       const playlistDescriptionText = playlistDescription || "A new collaborative playlist";
       const coverSeedUrl = `https://api.dicebear.com/7.x/shapes/svg?seed=${Date.now()}`;
+      const generatedPlaylistId = crypto.randomUUID();
 
-      const createAttempts: Array<Record<string, unknown>> = [
+      const createAttempts: Array<{ table: "collaborative_playlists" | "playlists"; payload: Record<string, unknown> }> = [
         {
-          title: playlistTitle,
-          description: playlistDescriptionText,
-          cover_url: coverSeedUrl,
-          created_by: currentUserId,
-          creator_id: currentUserId,
+          table: "collaborative_playlists",
+          payload: {
+            id: generatedPlaylistId,
+            title: playlistTitle,
+            description: playlistDescriptionText,
+            cover_url: coverSeedUrl,
+            created_by: currentUserId,
+            creator_id: currentUserId,
+          },
         },
         {
-          name: playlistTitle,
-          description: playlistDescriptionText,
-          cover_image: coverSeedUrl,
-          creator_id: currentUserId,
-          is_public: false,
+          table: "collaborative_playlists",
+          payload: {
+            id: generatedPlaylistId,
+            name: playlistTitle,
+            description: playlistDescriptionText,
+            cover_image: coverSeedUrl,
+            creator_id: currentUserId,
+            is_public: false,
+          },
         },
         {
-          title: playlistTitle,
-          description: playlistDescriptionText,
-          cover_url: coverSeedUrl,
-          created_by: currentUserId,
+          table: "collaborative_playlists",
+          payload: {
+            id: generatedPlaylistId,
+            title: playlistTitle,
+            description: playlistDescriptionText,
+            cover_url: coverSeedUrl,
+            created_by: currentUserId,
+          },
+        },
+        {
+          table: "playlists",
+          payload: {
+            id: generatedPlaylistId,
+            name: playlistTitle,
+            description: playlistDescriptionText,
+            cover_image: coverSeedUrl,
+            creator_id: currentUserId,
+            collaborators: [],
+            is_public: false,
+          },
+        },
+        {
+          table: "playlists",
+          payload: {
+            id: generatedPlaylistId,
+            name: playlistTitle,
+            description: playlistDescriptionText,
+            cover_image: coverSeedUrl,
+            creator_id: currentUserId,
+          },
         },
       ];
 
       let createdPlaylistId: string | null = null;
+      const createErrors: string[] = [];
 
-      for (const payload of createAttempts) {
-        const { data: createdPlaylist, error: playlistError } = await supabase
-          .from("collaborative_playlists")
-          .insert(payload)
-          .select("id")
-          .single();
+      for (const attempt of createAttempts) {
+        const { error: playlistError } = await supabase
+          .from(attempt.table)
+          .insert(attempt.payload);
 
-        if (!playlistError && createdPlaylist?.id) {
-          createdPlaylistId = createdPlaylist.id;
+        if (!playlistError) {
+          createdPlaylistId = generatedPlaylistId;
+          createdInTable = attempt.table;
           break;
         }
+
+        createErrors.push(
+          `${attempt.table}: ${playlistError.code || "ERR"} ${playlistError.message || "Unknown error"}`
+        );
       }
 
       if (!createdPlaylistId) {
-        throw new Error("Could not create playlist with current database schema.");
+        throw new Error(`Could not create playlist with current database schema. ${createErrors.join(" | ")}`);
       }
 
       playlistDbId = createdPlaylistId;
 
-      // Try to backfill creator_id for schemas that support it.
-      await supabase
-        .from("collaborative_playlists")
-        .update({ creator_id: currentUserId })
-        .eq("id", playlistDbId);
+      if (createdInTable === "collaborative_playlists") {
+        // Try to backfill creator_id for schemas that support it.
+        await supabase
+          .from("collaborative_playlists")
+          .update({ creator_id: currentUserId })
+          .eq("id", playlistDbId);
 
-      // Add creator as an initial contributor.
-      const { error: collaboratorInsertError } = await supabase.from("playlist_collaborators").upsert(
-        {
-          playlist_id: playlistDbId,
-          user_id: currentUserId,
-          role: 'owner',
-        },
-        { onConflict: "playlist_id,user_id" }
-      );
-
-      if (collaboratorInsertError) {
-        // Legacy fallback (older schema/table name).
-        const { error: contributorInsertError } = await supabase.from("playlist_contributors").upsert(
+        // Add creator as an initial contributor. Ignore failures if trigger already handled owner row.
+        const { error: collaboratorInsertError } = await supabase.from("playlist_collaborators").upsert(
           {
             playlist_id: playlistDbId,
             user_id: currentUserId,
+            role: "owner",
           },
           { onConflict: "playlist_id,user_id" }
         );
 
-        if (contributorInsertError) throw collaboratorInsertError;
+        if (collaboratorInsertError) {
+          const { error: contributorInsertError } = await supabase.from("playlist_contributors").upsert(
+            {
+              playlist_id: playlistDbId,
+              user_id: currentUserId,
+            },
+            { onConflict: "playlist_id,user_id" }
+          );
+
+          if (contributorInsertError) {
+            console.warn("Could not insert owner collaborator row:", collaboratorInsertError, contributorInsertError);
+          }
+        }
+      } else {
+        // Legacy table path: ensure creator is in collaborators array.
+        const { data: playlistRow } = await supabase
+          .from("playlists")
+          .select("collaborators")
+          .eq("id", playlistDbId)
+          .maybeSingle();
+
+        const existingCollaborators: string[] = Array.isArray(playlistRow?.collaborators)
+          ? playlistRow.collaborators
+          : [];
+
+        const updatedCollaborators = Array.from(new Set([...existingCollaborators, currentUserId]));
+
+        await supabase
+          .from("playlists")
+          .update({ collaborators: updatedCollaborators })
+          .eq("id", playlistDbId);
       }
 
       // Send invite notifications to selected collaborators.

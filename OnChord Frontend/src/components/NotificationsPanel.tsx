@@ -59,7 +59,16 @@ export default function NotificationsPanel() {
             .select('name')
             .eq('id', notification.playlistId)
             .maybeSingle();
-          playlistTitle = playlistRowByName?.name || playlistTitle;
+          if (playlistRowByName?.name) {
+            playlistTitle = playlistRowByName.name;
+          } else {
+            const { data: legacyPlaylistRow } = await supabase
+              .from('playlists')
+              .select('name')
+              .eq('id', notification.playlistId)
+              .maybeSingle();
+            playlistTitle = legacyPlaylistRow?.name || playlistTitle;
+          }
         }
       }
 
@@ -91,7 +100,45 @@ export default function NotificationsPanel() {
             { onConflict: 'playlist_id,user_id' }
           );
 
-        if (contributorError) throw contributorError;
+        if (contributorError) {
+          // Legacy fallback: playlists table with collaborators array.
+          let acceptedViaLegacyTable = false;
+
+          const { data: legacyPlaylistRow, error: legacyPlaylistError } = await supabase
+            .from('playlists')
+            .select('id, collaborators')
+            .eq('id', notification.playlistId)
+            .maybeSingle();
+
+          if (!legacyPlaylistError && legacyPlaylistRow?.id) {
+            const existingCollaborators: string[] = Array.isArray(legacyPlaylistRow.collaborators)
+              ? legacyPlaylistRow.collaborators
+              : [];
+
+            const updatedCollaborators = Array.from(new Set([...existingCollaborators, currentUserId]));
+
+            const { error: legacyUpdateError } = await supabase
+              .from('playlists')
+              .update({ collaborators: updatedCollaborators })
+              .eq('id', notification.playlistId);
+
+            acceptedViaLegacyTable = !legacyUpdateError;
+          }
+
+          if (!acceptedViaLegacyTable) {
+            const { error: contributorsTableError } = await supabase
+              .from('playlist_contributors')
+              .upsert(
+                {
+                  playlist_id: notification.playlistId,
+                  user_id: currentUserId,
+                },
+                { onConflict: 'playlist_id,user_id' }
+              );
+
+            if (contributorsTableError) throw contributorError;
+          }
+        }
       }
 
       await markAsRead(notification.id);
