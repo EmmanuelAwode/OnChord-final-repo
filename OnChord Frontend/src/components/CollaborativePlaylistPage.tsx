@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
 import { searchAlbums } from "../lib/api/musicSearch";
-import { getFollowing } from "../lib/api/follows";
+import { getMutualFollows } from "../lib/api/follows";
 import { getProfiles } from "../lib/api/profiles";
 import { supabase } from "../lib/supabaseClient";
 
@@ -145,7 +145,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     setTimeout(() => scrollToBottom(false), 50);
   }, []);
 
-  // Load followed users for invite flow.
+  // Load mutual-follow users for invite flow.
   useEffect(() => {
     if (!profile?.id) {
       setInviteFriends([]);
@@ -157,7 +157,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     async function loadInviteCandidates() {
       setIsLoadingInviteFriends(true);
       try {
-        const followingIds = await getFollowing();
+        const followingIds = await getMutualFollows();
         if (!active) return;
 
         if (followingIds.length === 0) {
@@ -381,6 +381,19 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       return;
     }
 
+    const mutualFollowIds = await getMutualFollows(500, 0);
+    const mutualFollowSet = new Set(mutualFollowIds);
+    const eligibleInvitees = filteredInvitees.filter((id) => mutualFollowSet.has(id));
+
+    if (eligibleInvitees.length === 0) {
+      toast.error("You can only invite users who follow you back.");
+      return;
+    }
+
+    if (eligibleInvitees.length !== filteredInvitees.length) {
+      toast.warning("Some selected users are no longer mutual followers and were skipped.");
+    }
+
     setIsSendingInvites(true);
     try {
       const { data: session } = await supabase.auth.getSession();
@@ -393,7 +406,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       const inviterName = profile?.display_name || profile?.username || "A user";
       const inviterAvatar = profile?.avatar_url || null;
 
-      const inviteRows = filteredInvitees.map((inviteeId) => ({
+      const inviteRows = eligibleInvitees.map((inviteeId) => ({
         user_id: inviteeId,
         type: "playlist_invite",
         title: "Playlist collaboration invite",
@@ -412,14 +425,14 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
         p.id === playlist.id
           ? {
               ...p,
-              pendingInviteCount: (p.pendingInviteCount || 0) + filteredInvitees.length,
+              pendingInviteCount: (p.pendingInviteCount || 0) + eligibleInvitees.length,
               lastUpdated: "Just now",
             }
           : p
       );
       setPlaylists(updatedPlaylists);
 
-      toast.success(`Sent ${filteredInvitees.length} invite${filteredInvitees.length > 1 ? "s" : ""}`);
+      toast.success(`Sent ${eligibleInvitees.length} invite${eligibleInvitees.length > 1 ? "s" : ""}`);
       setShowInviteModal(false);
       setSelectedInvitees([]);
       setInviteSearchQuery("");
@@ -876,7 +889,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
           <DialogHeader>
             <DialogTitle className="text-foreground">Invite Friends</DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              Invite people you follow to collaborate on this playlist
+              Invite users who follow you back to collaborate on this playlist
             </DialogDescription>
           </DialogHeader>
 
@@ -884,7 +897,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Search followed users..."
+                placeholder="Search mutual followers..."
                 value={inviteSearchQuery}
                 onChange={(e) => setInviteSearchQuery(e.target.value)}
                 className="pl-10 bg-background border-border"
@@ -893,12 +906,12 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
 
             <div className="space-y-2 max-h-72 overflow-y-auto nav-scroll">
               {isLoadingInviteFriends && (
-                <div className="p-4 text-center text-sm text-muted-foreground">Loading followed users...</div>
+                <div className="p-4 text-center text-sm text-muted-foreground">Loading mutual followers...</div>
               )}
 
               {!isLoadingInviteFriends && filteredInviteFriends.length === 0 && (
                 <div className="p-4 text-center text-sm text-muted-foreground border border-border rounded-lg bg-background">
-                  No followed users found to invite.
+                  No mutual followers found to invite.
                 </div>
               )}
 

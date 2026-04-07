@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { supabase } from '../lib/supabaseClient';
+import { isMutualFollow } from '../lib/api/follows';
 import { toast } from 'sonner';
 
 export default function NotificationsPanel() {
@@ -44,17 +45,38 @@ export default function NotificationsPanel() {
 
       let playlistTitle = 'this playlist';
       if (notification.playlistId) {
-        const { data: playlistRow } = await supabase
+        const { data: playlistRowByTitle } = await supabase
           .from('collaborative_playlists')
           .select('title')
           .eq('id', notification.playlistId)
           .maybeSingle();
-        playlistTitle = playlistRow?.title || playlistTitle;
+
+        if (playlistRowByTitle?.title) {
+          playlistTitle = playlistRowByTitle.title;
+        } else {
+          const { data: playlistRowByName } = await supabase
+            .from('collaborative_playlists')
+            .select('name')
+            .eq('id', notification.playlistId)
+            .maybeSingle();
+          playlistTitle = playlistRowByName?.name || playlistTitle;
+        }
       }
 
       if (decision === 'accept') {
         if (!notification.playlistId) {
           toast.error('Invalid invite: missing playlist ID');
+          return;
+        }
+
+        if (!notification.actionUserId) {
+          toast.error('Invalid invite: missing inviter');
+          return;
+        }
+
+        const hasMutualFollow = await isMutualFollow(notification.actionUserId);
+        if (!hasMutualFollow) {
+          toast.error('You can only collaborate with users who follow you back.');
           return;
         }
 

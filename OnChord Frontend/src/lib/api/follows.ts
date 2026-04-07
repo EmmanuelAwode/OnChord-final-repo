@@ -106,6 +106,73 @@ export async function getFollowers(limit = 20, offset = 0): Promise<string[]> {
 }
 
 /**
+ * Get list of users that both follow the current user and are followed by the current user.
+ */
+export async function getMutualFollows(limit = 200, offset = 0): Promise<string[]> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) return [];
+
+  const currentUserId = session.session.user.id;
+
+  const [{ data: followingData, error: followingError }, { data: followerData, error: followerError }] =
+    await Promise.all([
+      supabase
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", currentUserId)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1),
+      supabase
+        .from("follows")
+        .select("follower_id")
+        .eq("following_id", currentUserId),
+    ]);
+
+  if (followingError || followerError) {
+    console.error("Error fetching mutual follows:", followingError || followerError);
+    return [];
+  }
+
+  const followerSet = new Set((followerData || []).map((f) => f.follower_id));
+  return (followingData || [])
+    .map((f) => f.following_id)
+    .filter((id) => followerSet.has(id));
+}
+
+/**
+ * Check if another user has a mutual follow relationship with the current user.
+ */
+export async function isMutualFollow(userId: string): Promise<boolean> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session.session) return false;
+
+  const currentUserId = session.session.user.id;
+
+  const [{ data: followsThem, error: followsError }, { data: followsMe, error: followedByError }] =
+    await Promise.all([
+      supabase
+        .from("follows")
+        .select("id")
+        .eq("follower_id", currentUserId)
+        .eq("following_id", userId)
+        .maybeSingle(),
+      supabase
+        .from("follows")
+        .select("id")
+        .eq("follower_id", userId)
+        .eq("following_id", currentUserId)
+        .maybeSingle(),
+    ]);
+
+  if (followsError || followedByError) {
+    console.error("Error checking mutual follow status:", followsError || followedByError);
+    return false;
+  }
+
+  return !!followsThem && !!followsMe;
+}
+
+/**
  * Get follower count for a user
  */
 export async function getFollowerCount(userId: string): Promise<number> {

@@ -9,7 +9,7 @@ import { Users, Plus, Music, Search, UserPlus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
-import { getFollowing } from "../lib/api/follows";
+import { getMutualFollows } from "../lib/api/follows";
 import { getProfiles } from "../lib/api/profiles";
 import { supabase } from "../lib/supabaseClient";
 
@@ -32,7 +32,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
   const [isLoadingFriends, setIsLoadingFriends] = useState(false);
   const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
 
-  // Fetch friends (following list)
+  // Fetch invite candidates (mutual follows only)
   useEffect(() => {
     if (!profile?.id) {
       setFriends([]);
@@ -41,19 +41,19 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
 
     let active = true;
 
-    async function loadFollowingProfiles() {
+    async function loadMutualFollowProfiles() {
       setIsLoadingFriends(true);
       try {
-        const followingIds = await getFollowing();
+        const mutualFollowIds = await getMutualFollows();
 
         if (!active) return;
 
-        if (followingIds.length === 0) {
+        if (mutualFollowIds.length === 0) {
           setFriends([]);
           return;
         }
 
-        const followingProfiles = await getProfiles(followingIds);
+        const followingProfiles = await getProfiles(mutualFollowIds);
 
         if (!active) return;
 
@@ -65,14 +65,14 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
           }))
         );
       } catch (error) {
-        console.error("Failed to load following profiles:", error);
+        console.error("Failed to load mutual follow profiles:", error);
         if (active) setFriends([]);
       } finally {
         if (active) setIsLoadingFriends(false);
       }
     }
 
-    loadFollowingProfiles();
+    loadMutualFollowProfiles();
 
     return () => {
       active = false;
@@ -173,7 +173,21 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       return;
     }
 
-    const selectedCollaborators = selectedFriends
+    const mutualFollowIds = await getMutualFollows(500, 0);
+    const mutualFollowSet = new Set(mutualFollowIds);
+    const eligibleSelectedFriends = selectedFriends.filter((id) => mutualFollowSet.has(id));
+
+    if (eligibleSelectedFriends.length === 0) {
+      toast.error("You can only invite users who follow you back.");
+      return;
+    }
+
+    if (eligibleSelectedFriends.length !== selectedFriends.length) {
+      toast.warning("Some selected users are no longer mutual followers and were removed.");
+      setSelectedFriends(eligibleSelectedFriends);
+    }
+
+    const selectedCollaborators = eligibleSelectedFriends
       .map((friendId) => friends.find((f) => f.id === friendId))
       .filter((f): f is { id: string; name: string; avatar: string } => !!f);
 
@@ -195,23 +209,62 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         return;
       }
 
-      // Create playlist in DB so invite accept/decline can be processed by recipients.
-      const { data: createdPlaylist, error: playlistError } = await supabase
-        .from("collaborative_playlists")
-        .insert({
-          title: playlistTitle,
-          description: playlistDescription || "A new collaborative playlist",
-          cover_url: `https://api.dicebear.com/7.x/shapes/svg?seed=${Date.now()}`,
-          created_by: currentUserId,
-        })
-        .select("id")
-        .single();
+      // Create playlist in DB (supports legacy and newer schema variants).
+      const playlistDescriptionText = playlistDescription || "A new collaborative playlist";
+      const coverSeedUrl = `https://api.dicebear.com/7.x/shapes/svg?seed=${Date.now()}`;
 
-      if (playlistError) throw playlistError;
-      playlistDbId = createdPlaylist.id;
+      const createAttempts: Array<Record<string, unknown>> = [
+        {
+          title: playlistTitle,
+          description: playlistDescriptionText,
+          cover_url: coverSeedUrl,
+          created_by: currentUserId,
+          creator_id: currentUserId,
+        },
+        {
+          name: playlistTitle,
+          description: playlistDescriptionText,
+          cover_image: coverSeedUrl,
+          creator_id: currentUserId,
+          is_public: false,
+        },
+        {
+          title: playlistTitle,
+          description: playlistDescriptionText,
+          cover_url: coverSeedUrl,
+          created_by: currentUserId,
+        },
+      ];
+
+      let createdPlaylistId: string | null = null;
+
+      for (const payload of createAttempts) {
+        const { data: createdPlaylist, error: playlistError } = await supabase
+          .from("collaborative_playlists")
+          .insert(payload)
+          .select("id")
+          .single();
+
+        if (!playlistError && createdPlaylist?.id) {
+          createdPlaylistId = createdPlaylist.id;
+          break;
+        }
+      }
+
+      if (!createdPlaylistId) {
+        throw new Error("Could not create playlist with current database schema.");
+      }
+
+      playlistDbId = createdPlaylistId;
+
+      // Try to backfill creator_id for schemas that support it.
+      await supabase
+        .from("collaborative_playlists")
+        .update({ creator_id: currentUserId })
+        .eq("id", playlistDbId);
 
       // Add creator as an initial contributor.
-      await supabase.from("playlist_collaborators").upsert(
+      const { error: collaboratorInsertError } = await supabase.from("playlist_collaborators").upsert(
         {
           playlist_id: playlistDbId,
           user_id: currentUserId,
@@ -219,6 +272,19 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         },
         { onConflict: "playlist_id,user_id" }
       );
+
+      if (collaboratorInsertError) {
+        // Legacy fallback (older schema/table name).
+        const { error: contributorInsertError } = await supabase.from("playlist_contributors").upsert(
+          {
+            playlist_id: playlistDbId,
+            user_id: currentUserId,
+          },
+          { onConflict: "playlist_id,user_id" }
+        );
+
+        if (contributorInsertError) throw collaboratorInsertError;
+      }
 
       // Send invite notifications to selected collaborators.
       const inviterName = profile?.display_name || profile?.username || "A user";
@@ -240,7 +306,11 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       if (inviteError) throw inviteError;
     } catch (error) {
       console.error("Failed to create collaborative playlist invites:", error);
-      toast.error("Failed to create playlist invites. Please try again.");
+      const message =
+        error && typeof error === "object" && "message" in error
+          ? String((error as { message?: string }).message || "Please try again.")
+          : "Please try again.";
+      toast.error(`Failed to create playlist invites: ${message}`);
       return;
     } finally {
       setIsCreatingPlaylist(false);
@@ -268,7 +338,9 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
     // Add to the beginning of the playlists array
     setPlaylists([newPlaylist, ...playlists]);
 
-    toast.success(`Invites sent to ${selectedFriends.length} collaborator${selectedFriends.length > 1 ? 's' : ''}!`);
+    toast.success(
+      `Invites sent to ${selectedCollaborators.length} collaborator${selectedCollaborators.length > 1 ? 's' : ''}!`
+    );
     setShowCreateModal(false);
     setPlaylistTitle("");
     setPlaylistDescription("");
@@ -491,12 +563,12 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
               </div>
               <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
                 {isLoadingFriends && (
-                  <div className="p-4 text-center text-sm text-muted-foreground">Loading followed users...</div>
+                  <div className="p-4 text-center text-sm text-muted-foreground">Loading mutual followers...</div>
                 )}
 
                 {!isLoadingFriends && friends.length === 0 && (
                   <div className="p-4 text-center text-sm text-muted-foreground border border-border rounded-lg bg-background">
-                    You are not following anyone yet. Follow users first to invite collaborators.
+                    No mutual followers found yet. You can invite users only when you follow each other.
                   </div>
                 )}
 
