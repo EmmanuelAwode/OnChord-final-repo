@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Send, Music, Share2, MoreVertical, Image, Smile, X, Search, Plus, Loader2, MessageCirclePlus, ArrowLeft, User, Trash2, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { useDirectMessages, type Conversation, type DirectMessage } from "../lib/useDirectMessages";
+import { MessageContentWithEmbeds } from "./SpotifyTrackEmbed";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
 import { blockUser, unblockUser, hasBlockingRelationship } from "../lib/api/follows";
@@ -755,8 +756,12 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                           )}
                           {msg.content && (
                             <>
-                              <p className="text-sm md:text-base mb-1 break-words">{msg.content}</p>
-                              <span className={`text-[10px] md:text-xs ${isOwn ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                              <MessageContentWithEmbeds 
+                                content={msg.content} 
+                                onOpenTrack={onOpenAlbum}
+                                showPreviewButton={true}
+                              />
+                              <span className={`text-[10px] md:text-xs block mt-2 ${isOwn ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                                 {formatTimestamp(msg.created_at)}
                               </span>
                             </>

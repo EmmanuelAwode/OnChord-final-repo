@@ -13,7 +13,7 @@ export function QuickActionButton({ onAction }: QuickActionButtonProps) {
     { id: "review", label: "Add Review", icon: FileText, color: "from-purple-500 to-purple-600" },
     { id: "collab", label: "Manage Collab", icon: Music, color: "from-green-500 to-emerald-600" },
     { id: "list", label: "Add to List", icon: ListPlus, color: "from-blue-500 to-blue-600" },
-    { id: "event", label: "Log Concert", icon: Calendar, color: "from-pink-500 to-pink-600" },
+    { id: "event", label: "Find Events", icon: Calendar, color: "from-pink-500 to-pink-600" },
     { id: "connect", label: "Find Friends", icon: Users, color: "from-orange-500 to-orange-600" },
   ];
 

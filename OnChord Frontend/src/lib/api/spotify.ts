@@ -638,6 +638,13 @@ export async function getTrack(trackId: string) {
 }
 
 /**
+ * Alias for getTrack - retrieves Spotify track data by ID
+ */
+export async function getSpotifyTrack(trackId: string) {
+  return getTrack(trackId);
+}
+
+/**
  * Get audio features for a track
  * Note: This endpoint may be restricted for new Spotify apps.
  * Returns null if unavailable rather than throwing.
