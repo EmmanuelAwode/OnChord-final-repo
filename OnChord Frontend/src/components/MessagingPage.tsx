@@ -661,14 +661,14 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
                 <div className="w-full max-w-[760px] mx-auto">
                   {selectedImage && (
                     <div className="mb-2 relative w-fit">
-                      <img src={selectedImage} alt="Selected" className="max-w-[60px] max-h-[60px] w-auto h-auto rounded-lg border-2 border-primary object-contain" />
+                      <img src={selectedImage} alt="Selected" className="max-w-[40px] max-h-[40px] w-auto h-auto rounded-lg border-2 border-primary object-contain" />
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() => setSelectedImage(null)}
-                        className="absolute -top-2 -right-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full w-5 h-5 p-0 flex items-center justify-center"
+                        className="absolute -top-1.5 -right-1.5 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full w-4 h-4 p-0 flex items-center justify-center"
                       >
-                        <X className="w-2.5 h-2.5" />
+                        <X className="w-2 h-2" />
                       </Button>
                     </div>
                   )}
