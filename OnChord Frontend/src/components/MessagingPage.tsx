@@ -660,16 +660,18 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
               <div className="px-3 py-3 md:px-4 border-t border-border/80 flex-shrink-0">
                 <div className="w-full max-w-[760px] mx-auto">
                   {selectedImage && (
-                    <div className="mb-2 relative w-fit">
-                      <img src={selectedImage} alt="Selected" className="w-10 h-10 rounded-md border border-primary object-cover" />
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setSelectedImage(null)}
-                        className="absolute -top-1 -right-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full w-4 h-4 p-0 flex items-center justify-center"
-                      >
-                        <X className="w-2 h-2" />
-                      </Button>
+                    <div className="mb-3 relative flex justify-center">
+                      <div className="relative">
+                        <img src={selectedImage} alt="Selected" className="max-w-sm max-h-96 rounded-lg border-2 border-primary object-cover" />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setSelectedImage(null)}
+                          className="absolute top-2 right-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full w-8 h-8 p-0 flex items-center justify-center shadow-lg"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
                   )}
                   <div className="flex items-center h-14 gap-2">
