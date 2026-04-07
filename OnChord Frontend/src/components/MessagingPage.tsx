@@ -660,15 +660,15 @@ export function MessagingPage({ onBack, canGoBack, onNavigate, onViewProfile, on
               <div className="px-3 py-3 md:px-4 border-t border-border/80 flex-shrink-0">
                 <div className="w-full max-w-[760px] mx-auto">
                   {selectedImage && (
-                    <div className="mb-3 relative inline-block">
-                      <img src={selectedImage} alt="Selected" className="max-h-28 rounded-lg border-2 border-primary" />
+                    <div className="mb-2 relative w-fit">
+                      <img src={selectedImage} alt="Selected" className="max-w-[60px] max-h-[60px] w-auto h-auto rounded-lg border-2 border-primary object-contain" />
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() => setSelectedImage(null)}
-                        className="absolute -top-2 -right-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full w-6 h-6 p-0"
+                        className="absolute -top-2 -right-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full w-5 h-5 p-0 flex items-center justify-center"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-2.5 h-2.5" />
                       </Button>
                     </div>
                   )}
