@@ -206,15 +206,20 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
     setDeleteDialogOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (reviewToDelete) {
-      deleteReview(reviewToDelete.id);
-      toast.success("Review deleted successfully");
-      setDeleteDialogOpen(false);
-      setReviewToDelete(null);
-      // Close any open modals showing the deleted review
-      setModalOpen(false);
-      setReviewDetailModalOpen(false);
+      try {
+        await deleteReview(reviewToDelete.id);
+        toast.success("Review deleted successfully");
+        setDeleteDialogOpen(false);
+        setReviewToDelete(null);
+        // Close any open modals showing the deleted review
+        setModalOpen(false);
+        setReviewDetailModalOpen(false);
+      } catch (error) {
+        console.error("Failed to delete review:", error);
+        toast.error("Failed to delete review");
+      }
     }
   };
 
@@ -1367,10 +1372,15 @@ export function ReviewsPage({ onNavigate, onOpenAlbum, onEditReview, onOpenEvent
           setReviewDetailModalOpen(false);
           onEditReview?.(review); // parent can open CreateReviewPage in edit mode
         }}
-        onDeleteReview={(reviewId) => {
-          deleteReview(reviewId);
-          setReviewDetailModalOpen(false);
-          toast.success("Review deleted successfully");
+        onDeleteReview={async (reviewId) => {
+          try {
+            await deleteReview(reviewId);
+            setReviewDetailModalOpen(false);
+            toast.success("Review deleted successfully");
+          } catch (error) {
+            console.error("Failed to delete review:", error);
+            toast.error("Failed to delete review");
+          }
         }}
       />
 

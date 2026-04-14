@@ -144,24 +144,16 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
     let isCancelled = false;
 
     async function loadPersonalizedData() {
-      // Create timeout promise
-      const timeoutPromise = (ms: number) => new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Request timeout')), ms)
-      );
-
-      // Load releases in parallel with timeout (Spotify can take 30-40 seconds for 10 artists × 8s timeout)
+      // Load releases (API layer already has timeout + fallback behavior)
       setLoadingReleases(true);
-      Promise.race([
-        getPersonalizedNewReleases(4),
-        timeoutPromise(40000) // 40 seconds: accounts for 10 artists × 8s timeout + delays
-      ])
+      getPersonalizedNewReleases(4)
         .then(releases => {
           if (!isCancelled) {
             setPersonalizedReleases(releases as typeof personalizedReleases);
           }
         })
         .catch(err => {
-          console.error("Failed to load personalized releases:", err.message);
+          console.warn("Failed to load personalized releases; showing fallback state.", err);
           // Set fallback data on timeout or error
           if (!isCancelled) {
             setPersonalizedReleases([]);
@@ -173,19 +165,16 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
           }
         });
 
-      // Load concerts in parallel with timeout (Ticketmaster can be slow with multiple artists)
+      // Load concerts (API layer already has timeout + fallback behavior)
       setLoadingConcerts(true);
-      Promise.race([
-        getPersonalizedConcerts(4),
-        timeoutPromise(120000) // 120 seconds: accounts for 10+ artists + Supabase queries + Ticketmaster rate limiting
-      ])
+      getPersonalizedConcerts(4)
         .then(concerts => {
           if (!isCancelled) {
             setPersonalizedConcerts(concerts as typeof personalizedConcerts);
           }
         })
         .catch(err => {
-          console.error("Failed to load personalized concerts:", err.message);
+          console.warn("Failed to load personalized concerts; showing fallback state.", err);
           // Set fallback data on timeout or error
           if (!isCancelled) {
             setPersonalizedConcerts([]);
@@ -256,12 +245,17 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
     setDeleteDialogOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (reviewToDelete) {
-      deleteReview(reviewToDelete.id);
-      toast.success("Review deleted successfully");
-      setDeleteDialogOpen(false);
-      setReviewToDelete(null);
+      try {
+        await deleteReview(reviewToDelete.id);
+        toast.success("Review deleted successfully");
+        setDeleteDialogOpen(false);
+        setReviewToDelete(null);
+      } catch (error) {
+        console.error("Failed to delete review:", error);
+        toast.error("Failed to delete review");
+      }
     }
   };
 

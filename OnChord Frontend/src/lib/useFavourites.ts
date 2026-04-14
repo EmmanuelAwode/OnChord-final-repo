@@ -15,6 +15,7 @@ export interface FavouriteAlbum {
   title: string;
   artist: string;
   cover: string;
+  releaseType?: string;
   releaseDate?: string;
   trackCount?: number;
   addedAt: string;
@@ -25,6 +26,78 @@ const FAVOURITES_KEY = 'onchord_favourites';
 interface FavouritesData {
   songs: FavouriteSong[];
   albums: FavouriteAlbum[];
+}
+
+function isValidDate(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(new Date(value).getTime());
+}
+
+function normalizeFavouritesData(raw: unknown): FavouritesData {
+  const fallback: FavouritesData = { songs: [], albums: [] };
+  if (!raw || typeof raw !== "object") return fallback;
+
+  const source = raw as { songs?: unknown[]; albums?: unknown[] };
+  const songsInput = Array.isArray(source.songs) ? source.songs : [];
+  const albumsInput = Array.isArray(source.albums) ? source.albums : [];
+
+  const songsById = new Map<string, FavouriteSong>();
+  const albumsById = new Map<string, FavouriteAlbum>();
+
+  const maybeAddSong = (item: any) => {
+    if (!item || typeof item !== "object" || typeof item.id !== "string" || typeof item.title !== "string") return;
+    if (songsById.has(item.id)) return;
+    songsById.set(item.id, {
+      id: item.id,
+      title: item.title,
+      artist: typeof item.artist === "string" ? item.artist : "Unknown",
+      albumId: typeof item.albumId === "string" ? item.albumId : "",
+      albumCover: typeof item.albumCover === "string" ? item.albumCover : (typeof item.cover === "string" ? item.cover : ""),
+      duration: typeof item.duration === "string" ? item.duration : undefined,
+      addedAt: isValidDate(item.addedAt) ? item.addedAt : new Date().toISOString(),
+    });
+  };
+
+  const maybeAddAlbum = (item: any) => {
+    if (!item || typeof item !== "object" || typeof item.id !== "string" || typeof item.title !== "string") return;
+    if (albumsById.has(item.id)) return;
+    albumsById.set(item.id, {
+      id: item.id,
+      title: item.title,
+      artist: typeof item.artist === "string" ? item.artist : "Unknown",
+      cover: typeof item.cover === "string" ? item.cover : (typeof item.albumCover === "string" ? item.albumCover : ""),
+      releaseType: typeof item.releaseType === "string" ? item.releaseType : undefined,
+      releaseDate: typeof item.releaseDate === "string" ? item.releaseDate : undefined,
+      trackCount: typeof item.trackCount === "number" ? item.trackCount : undefined,
+      addedAt: isValidDate(item.addedAt) ? item.addedAt : new Date().toISOString(),
+    });
+  };
+
+  for (const item of songsInput) {
+    maybeAddSong(item);
+  }
+
+  for (const item of albumsInput) {
+    const looksLikeSingle =
+      (typeof item?.releaseType === "string" && item.releaseType.toLowerCase() === "single") ||
+      item?.trackCount === 1 ||
+      String(item?.title || "").toLowerCase().endsWith("- single");
+
+    if (looksLikeSingle) {
+      maybeAddSong({
+        ...item,
+        albumId: typeof item?.albumId === "string" ? item.albumId : item?.id,
+        albumCover: typeof item?.albumCover === "string" ? item.albumCover : item?.cover,
+      });
+      continue;
+    }
+
+    maybeAddAlbum(item);
+  }
+
+  return {
+    songs: Array.from(songsById.values()),
+    albums: Array.from(albumsById.values()),
+  };
 }
 
 export function useFavourites() {
@@ -39,7 +112,7 @@ export function useFavourites() {
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        setFavourites(parsed);
+        setFavourites(normalizeFavouritesData(parsed));
       } catch (error) {
         console.error('Failed to parse favourites:', error);
         setFavourites({ songs: [], albums: [] });

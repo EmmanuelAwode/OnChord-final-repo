@@ -8,6 +8,56 @@ export interface Follow {
   created_at: string;
 }
 
+const FOLLOW_PAGE_SIZE = 1000;
+
+async function fetchAllFollowIds(
+  currentUserId: string,
+  mode: "following" | "followers",
+  limit = 200
+): Promise<string[]> {
+  const results: string[] = [];
+  let offset = 0;
+  const cappedLimit = Math.max(1, limit);
+
+  while (results.length < cappedLimit) {
+    const remaining = cappedLimit - results.length;
+    const pageSize = Math.min(FOLLOW_PAGE_SIZE, remaining);
+
+    const query =
+      mode === "following"
+        ? supabase
+            .from("follows")
+            .select("following_id")
+            .eq("follower_id", currentUserId)
+            .order("created_at", { ascending: false })
+        : supabase
+            .from("follows")
+            .select("follower_id")
+            .eq("following_id", currentUserId)
+            .order("created_at", { ascending: false });
+
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+
+    if (error) {
+      throw error;
+    }
+
+    const rows = data || [];
+    if (rows.length === 0) break;
+
+    if (mode === "following") {
+      results.push(...rows.map((row: any) => String(row.following_id || "")).filter(Boolean));
+    } else {
+      results.push(...rows.map((row: any) => String(row.follower_id || "")).filter(Boolean));
+    }
+
+    if (rows.length < pageSize) break;
+    offset += rows.length;
+  }
+
+  return results;
+}
+
 /**
  * Follow a user
  */
@@ -114,29 +164,21 @@ export async function getMutualFollows(limit = 200, offset = 0): Promise<string[
 
   const currentUserId = session.session.user.id;
 
-  const [{ data: followingData, error: followingError }, { data: followerData, error: followerError }] =
-    await Promise.all([
-      supabase
-        .from("follows")
-        .select("following_id")
-        .eq("follower_id", currentUserId)
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1),
-      supabase
-        .from("follows")
-        .select("follower_id")
-        .eq("following_id", currentUserId),
+  try {
+    const [followingIds, followerIds] = await Promise.all([
+      fetchAllFollowIds(currentUserId, "following", offset + limit),
+      fetchAllFollowIds(currentUserId, "followers", offset + limit),
     ]);
 
-  if (followingError || followerError) {
-    console.error("Error fetching mutual follows:", followingError || followerError);
+    const followerSet = new Set(followerIds.map((id) => id.trim()).filter(Boolean));
+    const mutualIds = followingIds.filter((id) => followerSet.has(id.trim()));
+
+    const deduped = Array.from(new Set(mutualIds));
+    return deduped.slice(offset, offset + limit);
+  } catch (error) {
+    console.error("Error fetching mutual follows:", error);
     return [];
   }
-
-  const followerSet = new Set((followerData || []).map((f) => f.follower_id));
-  return (followingData || [])
-    .map((f) => f.following_id)
-    .filter((id) => followerSet.has(id));
 }
 
 /**

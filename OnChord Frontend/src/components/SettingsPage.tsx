@@ -9,40 +9,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Slider } from "./ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
 import { toast } from "sonner";
 import { PageHeader } from "./PageHeader";
 import { initiateSpotifyLogin, getSpotifyConnection, disconnectSpotify, handleSpotifyCallback } from "../lib/api/spotify";
 import { supabase } from "../lib/supabaseClient";
 import { 
-  Bell, 
   Lock, 
   Palette, 
   User, 
   Music, 
-  Volume2,
-  Download,
-  Eye,
-  Zap,
-  Archive,
-  FileText,
   Shield,
-  UserPlus,
-  Heart,
-  MessageCircle,
-  Star,
-  Radio,
-  BarChart3,
   Moon,
   Sun,
   Monitor,
   ChevronRight,
   Check,
   LogOut,
-  Copy,
-  Code
+  Loader2
 } from "lucide-react";
-import { motion } from "motion/react";
 
 const accentColors = [
   { name: "Purple", value: "#A78BFA", id: "purple" },
@@ -214,66 +198,12 @@ export function SettingsPage({
   const [reduceMotion, setReduceMotion] = useState(() => loadSetting("reduceMotion", false));
   const [highContrast, setHighContrast] = useState(() => loadSetting("highContrast", false));
 
-  // Audio settings
-  const [audioQuality, setAudioQuality] = useState(() => loadSetting("audioQuality", "high"));
-  const [normalizeVolume, setNormalizeVolume] = useState(() => loadSetting("normalizeVolume", true));
-  const [crossfade, setCrossfade] = useState(() => loadSetting("crossfade", true));
-  const [crossfadeDuration, setCrossfadeDuration] = useState(() => loadSetting("crossfadeDuration", [3]));
-  const [gaplessPlayback, setGaplessPlayback] = useState(() => loadSetting("gaplessPlayback", true));
-  const [autoplay, setAutoplay] = useState(() => loadSetting("autoplay", true));
-
-  // Notifications
-  const [notifications, setNotifications] = useState(() => loadSetting("notifications", {
-    likes: true,
-    comments: true,
-    follows: true,
-    messages: true,
-    newReleases: true,
-    recommendations: true,
-    weeklyRecap: true,
-    friendActivity: false,
-    tasteMatch: true,
-    playlistUpdates: true,
-  }));
-  const [notificationSound, setNotificationSound] = useState(() => loadSetting("notificationSound", true));
-  const [emailNotifications, setEmailNotifications] = useState(() => loadSetting("emailNotifications", true));
-  const [pushNotifications, setPushNotifications] = useState(() => loadSetting("pushNotifications", true));
-
-  // Privacy
-  const [privacy, setPrivacy] = useState(() => loadSetting("privacy", {
-    publicReviews: true,
-    publicLists: true,
-    showActivity: true,
-    allowMessages: true,
-    showListeningHistory: true,
-    discoverableByEmail: false,
-    showOnlineStatus: true,
-    allowTagging: true,
-  }));
-
-  // Advanced
-  const [betaFeatures, setBetaFeatures] = useState(() => loadSetting("betaFeatures", false));
-  const [analyticsEnabled, setAnalyticsEnabled] = useState(() => loadSetting("analyticsEnabled", true));
-
   // Persist settings to localStorage when they change
   useEffect(() => { saveSetting("themeMode", themeMode); }, [themeMode]);
   useEffect(() => { saveSetting("fontSize", fontSize); }, [fontSize]);
   useEffect(() => { saveSetting("displayDensity", displayDensity); }, [displayDensity]);
   useEffect(() => { saveSetting("reduceMotion", reduceMotion); }, [reduceMotion]);
   useEffect(() => { saveSetting("highContrast", highContrast); }, [highContrast]);
-  useEffect(() => { saveSetting("audioQuality", audioQuality); }, [audioQuality]);
-  useEffect(() => { saveSetting("normalizeVolume", normalizeVolume); }, [normalizeVolume]);
-  useEffect(() => { saveSetting("crossfade", crossfade); }, [crossfade]);
-  useEffect(() => { saveSetting("crossfadeDuration", crossfadeDuration); }, [crossfadeDuration]);
-  useEffect(() => { saveSetting("gaplessPlayback", gaplessPlayback); }, [gaplessPlayback]);
-  useEffect(() => { saveSetting("autoplay", autoplay); }, [autoplay]);
-  useEffect(() => { saveSetting("notifications", notifications); }, [notifications]);
-  useEffect(() => { saveSetting("notificationSound", notificationSound); }, [notificationSound]);
-  useEffect(() => { saveSetting("emailNotifications", emailNotifications); }, [emailNotifications]);
-  useEffect(() => { saveSetting("pushNotifications", pushNotifications); }, [pushNotifications]);
-  useEffect(() => { saveSetting("privacy", privacy); }, [privacy]);
-  useEffect(() => { saveSetting("betaFeatures", betaFeatures); }, [betaFeatures]);
-  useEffect(() => { saveSetting("analyticsEnabled", analyticsEnabled); }, [analyticsEnabled]);
 
   // Apply reduce motion setting
   useEffect(() => {
@@ -306,10 +236,6 @@ export function SettingsPage({
   }, []);
 
   // Modals
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
-
-  // Security - password change
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -416,18 +342,6 @@ export function SettingsPage({
           <TabsTrigger value="appearance" className="flex items-center gap-2">
             <Palette className="w-4 h-4" />
             <span className="hidden sm:inline">Appearance</span>
-          </TabsTrigger>
-          <TabsTrigger value="audio" className="flex items-center gap-2">
-            <Volume2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Audio</span>
-          </TabsTrigger>
-          <TabsTrigger value="notifications" className="flex items-center gap-2">
-            <Bell className="w-4 h-4" />
-            <span className="hidden sm:inline">Notifications</span>
-          </TabsTrigger>
-          <TabsTrigger value="privacy" className="flex items-center gap-2">
-            <Lock className="w-4 h-4" />
-            <span className="hidden sm:inline">Privacy</span>
           </TabsTrigger>
           <TabsTrigger value="account" className="flex items-center gap-2">
             <User className="w-4 h-4" />
@@ -574,287 +488,6 @@ export function SettingsPage({
                     </p>
                   </div>
                   <Switch checked={highContrast} onCheckedChange={setHighContrast} />
-                </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Audio Settings */}
-        <TabsContent value="audio" className="space-y-6 mt-6">
-          <Card className="p-6 bg-card border-border">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="bg-chart-1/20 p-2 rounded-lg">
-                <Volume2 className="w-5 h-5 text-chart-1" />
-              </div>
-              <h2 className="text-xl text-foreground">Playback Settings</h2>
-            </div>
-
-            <div className="space-y-6">
-              {/* Audio Quality */}
-              <div>
-                <Label className="text-foreground mb-3 block">Streaming Quality</Label>
-                <Select value={audioQuality} onValueChange={setAudioQuality}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low - 96 kbps (Save data)</SelectItem>
-                    <SelectItem value="normal">Normal - 160 kbps</SelectItem>
-                    <SelectItem value="high">High - 320 kbps (Recommended)</SelectItem>
-                    <SelectItem value="lossless">Lossless - FLAC</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Playback Features */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-foreground">Normalize Volume</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Keep volume consistent across tracks
-                    </p>
-                  </div>
-                  <Switch checked={normalizeVolume} onCheckedChange={setNormalizeVolume} />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-foreground">Crossfade</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Smooth transitions between songs
-                    </p>
-                  </div>
-                  <Switch checked={crossfade} onCheckedChange={setCrossfade} />
-                </div>
-
-                {crossfade && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="pl-4 space-y-3"
-                  >
-                    <Label className="text-sm text-muted-foreground">Crossfade Duration</Label>
-                    <div className="flex items-center gap-4">
-                      <Slider
-                        value={crossfadeDuration}
-                        onValueChange={setCrossfadeDuration}
-                        min={0}
-                        max={12}
-                        step={1}
-                        className="flex-1"
-                      />
-                      <span className="text-sm text-foreground w-12">{crossfadeDuration[0]}s</span>
-                    </div>
-                  </motion.div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-foreground">Gapless Playback</Label>
-                    <p className="text-sm text-muted-foreground">
-                      No silence between tracks
-                    </p>
-                  </div>
-                  <Switch checked={gaplessPlayback} onCheckedChange={setGaplessPlayback} />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-foreground">Autoplay</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Continue with similar tracks when queue ends
-                    </p>
-                  </div>
-                  <Switch checked={autoplay} onCheckedChange={setAutoplay} />
-                </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Notifications Settings */}
-        <TabsContent value="notifications" className="space-y-6 mt-6">
-          <Card className="p-6 bg-card border-border">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="bg-secondary/20 p-2 rounded-lg">
-                <Bell className="w-5 h-5 text-secondary" />
-              </div>
-              <h2 className="text-xl text-foreground">Notification Preferences</h2>
-            </div>
-
-            <div className="space-y-6">
-              {/* Notification Channels */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-foreground">Push Notifications</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receive notifications on this device
-                    </p>
-                  </div>
-                  <Switch checked={pushNotifications} onCheckedChange={setPushNotifications} />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-foreground">Email Notifications</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receive updates via email
-                    </p>
-                  </div>
-                  <Switch checked={emailNotifications} onCheckedChange={setEmailNotifications} />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-foreground">Notification Sounds</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Play sound when notifications arrive
-                    </p>
-                  </div>
-                  <Switch checked={notificationSound} onCheckedChange={setNotificationSound} />
-                </div>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Notification Types */}
-              <div>
-                <Label className="text-foreground mb-4 block">What to be notified about</Label>
-                <div className="space-y-4">
-                  {[
-                    { key: "likes", icon: Heart, label: "Likes", desc: "When someone likes your review" },
-                    { key: "comments", icon: MessageCircle, label: "Comments", desc: "When someone comments on your content" },
-                    { key: "follows", icon: UserPlus, label: "New Followers", desc: "When someone starts following you" },
-                    { key: "messages", icon: MessageCircle, label: "Messages", desc: "Direct message notifications" },
-                    { key: "newReleases", icon: Music, label: "New Releases", desc: "From artists you follow" },
-                    { key: "recommendations", icon: Star, label: "Recommendations", desc: "Personalized music suggestions" },
-                    { key: "weeklyRecap", icon: BarChart3, label: "Weekly Recap", desc: "Your listening statistics" },
-                    { key: "friendActivity", icon: Radio, label: "Friend Activity", desc: "What your friends are listening to" },
-                    { key: "tasteMatch", icon: Zap, label: "Taste Matches", desc: "When you match with other users" },
-                    { key: "playlistUpdates", icon: Music, label: "Playlist Updates", desc: "Changes to collaborative playlists" },
-                  ].map(({ key, icon: Icon, label, desc }) => (
-                    <div key={key} className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-muted p-2 rounded-lg">
-                          <Icon className="w-4 h-4 text-muted-foreground" />
-                        </div>
-                        <div>
-                          <Label className="text-foreground">{label}</Label>
-                          <p className="text-sm text-muted-foreground">{desc}</p>
-                        </div>
-                      </div>
-                      <Switch
-                        checked={notifications[key as keyof typeof notifications]}
-                        onCheckedChange={(checked) =>
-                          setNotifications({ ...notifications, [key]: checked })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Privacy Settings */}
-        <TabsContent value="privacy" className="space-y-6 mt-6">
-          <Card className="p-6 bg-card border-border">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="bg-chart-3/20 p-2 rounded-lg">
-                <Lock className="w-5 h-5 text-chart-3" />
-              </div>
-              <h2 className="text-xl text-foreground">Privacy & Security</h2>
-            </div>
-
-            <div className="space-y-6">
-              {/* Profile Privacy */}
-              <div>
-                <Label className="text-foreground mb-4 block">Profile Visibility</Label>
-                <div className="space-y-4">
-                  {[
-                    { key: "publicReviews", label: "Public Reviews", desc: "Allow others to see your reviews" },
-                    { key: "publicLists", label: "Public Playlists", desc: "Make your playlists visible to everyone" },
-                    { key: "showActivity", label: "Activity Status", desc: "Show your listening activity to friends" },
-                    { key: "showListeningHistory", label: "Listening History", desc: "Display your recent tracks publicly" },
-                    { key: "showOnlineStatus", label: "Online Status", desc: "Let others see when you're active" },
-                  ].map(({ key, label, desc }) => (
-                    <div key={key} className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-foreground">{label}</Label>
-                        <p className="text-sm text-muted-foreground">{desc}</p>
-                      </div>
-                      <Switch
-                        checked={privacy[key as keyof typeof privacy]}
-                        onCheckedChange={(checked) =>
-                          setPrivacy({ ...privacy, [key]: checked })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Communication Privacy */}
-              <div>
-                <Label className="text-foreground mb-4 block">Communication</Label>
-                <div className="space-y-4">
-                  {[
-                    { key: "allowMessages", label: "Direct Messages", desc: "Allow others to message you" },
-                    { key: "allowTagging", label: "Tagging", desc: "Let others tag you in posts" },
-                    { key: "discoverableByEmail", label: "Email Discovery", desc: "Allow people to find you by email" },
-                  ].map(({ key, label, desc }) => (
-                    <div key={key} className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-foreground">{label}</Label>
-                        <p className="text-sm text-muted-foreground">{desc}</p>
-                      </div>
-                      <Switch
-                        checked={privacy[key as keyof typeof privacy]}
-                        onCheckedChange={(checked) =>
-                          setPrivacy({ ...privacy, [key]: checked })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Data Controls */}
-              <div>
-                <Label className="text-foreground mb-4 block">Data Management</Label>
-                <div className="space-y-3">
-                  <Button variant="outline" className="w-full justify-between border-border">
-                    <span className="flex items-center gap-2">
-                      <Download className="w-4 h-4" />
-                      Download Your Data
-                    </span>
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
-                  <Button variant="outline" className="w-full justify-between border-border">
-                    <span className="flex items-center gap-2">
-                      <Archive className="w-4 h-4" />
-                      Request Account Archive
-                    </span>
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
-                  <Button variant="outline" className="w-full justify-between border-border">
-                    <span className="flex items-center gap-2">
-                      <FileText className="w-4 h-4" />
-                      Privacy Policy
-                    </span>
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
                 </div>
               </div>
             </div>
@@ -1059,20 +692,11 @@ export function SettingsPage({
                       </div>
                     </div>
                   )}
-
-                  <Button variant="outline" className="w-full justify-between border-border">
-                    <span className="flex items-center gap-2">
-                      <Eye className="w-4 h-4" />
-                      Active Sessions
-                    </span>
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
                 </div>
               </div>
-
               <Separator className="bg-border" />
 
-              {/* Session Management */}
+              {/* Session */}
               <div>
                 <Label className="text-foreground mb-3 block">Session</Label>
                 <Button 
@@ -1090,188 +714,10 @@ export function SettingsPage({
                   You'll need to sign in again to access your account
                 </p>
               </div>
-
-              <Separator className="bg-border" />
-
-              {/* Developer Info */}
-              <div>
-                <Label className="text-foreground mb-3 block flex items-center gap-2">
-                  <Code className="w-4 h-4" />
-                  Developer Info
-                </Label>
-                <div className="p-4 bg-muted/30 rounded-lg border border-border space-y-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1.5">Your User ID (for testing)</p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 p-2 bg-background rounded text-xs text-foreground font-mono break-all">
-                        {currentUserId || 'Loading...'}
-                      </code>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          if (currentUserId) {
-                            navigator.clipboard.writeText(currentUserId);
-                            toast.success('User ID copied to clipboard!');
-                          }
-                        }}
-                        disabled={!currentUserId}
-                      >
-                        <Copy className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    💡 Use this ID to update mock data and test follow features. Log in with both accounts to get both IDs.
-                  </p>
-                </div>
-              </div>
-
-              <Separator className="bg-border" />
-
-              {/* Danger Zone */}
-              <div>
-                <Label className="text-destructive mb-3 block">Danger Zone</Label>
-                <div className="space-y-3 p-4 border-2 border-destructive/20 rounded-lg">
-                  <Button 
-                    variant="outline" 
-                    className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
-                    onClick={() => setShowDeactivateDialog(true)}
-                  >
-                    Deactivate Account
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    className="w-full border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                    onClick={() => setShowDeleteDialog(true)}
-                  >
-                    Delete Account Permanently
-                  </Button>
-                  <p className="text-xs text-muted-foreground text-center">
-                    These actions cannot be undone. Please be certain.
-                  </p>
-                </div>
-              </div>
             </div>
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* Save Button */}
-      <div className="flex justify-end gap-3 pb-8">
-        <Button 
-          variant="outline" 
-          className="border-border"
-          onClick={() => {
-            // Reset to defaults
-            setThemeMode(darkMode ? "dark" : "light");
-            setFontSize([16]);
-            setDisplayDensity("comfortable");
-            setReduceMotion(false);
-            setHighContrast(false);
-            setLanguage("en");
-            setDateFormat("mdy");
-            setTimeFormat("12h");
-            setTimezone("auto");
-            setAudioQuality("high");
-            setNormalizeVolume(true);
-            setCrossfade(true);
-            setCrossfadeDuration([3]);
-            setGaplessPlayback(true);
-            setAutoplay(true);
-            setNotifications({
-              likes: true,
-              comments: true,
-              follows: true,
-              messages: true,
-              newReleases: true,
-              recommendations: true,
-              weeklyRecap: true,
-              friendActivity: false,
-              tasteMatch: true,
-              playlistUpdates: true,
-            });
-            setNotificationSound(true);
-            setEmailNotifications(true);
-            setPushNotifications(true);
-            setPrivacy({
-              publicReviews: true,
-              publicLists: true,
-              showActivity: true,
-              allowMessages: true,
-              showListeningHistory: true,
-              discoverableByEmail: false,
-              showOnlineStatus: true,
-              allowTagging: true,
-            });
-            setBetaFeatures(false);
-            setAnalyticsEnabled(true);
-            document.documentElement.style.setProperty("--font-size", "16px");
-            toast.success("Settings reset to defaults");
-          }}
-        >
-          Reset to Defaults
-        </Button>
-        <Button 
-          className="bg-primary hover:bg-primary/90 text-primary-foreground"
-          onClick={() => toast.success("All settings are automatically saved!")}
-        >
-          <Check className="w-4 h-4 mr-2" />
-          Save All Changes
-        </Button>
-      </div>
-
-      {/* Delete Account Confirmation Dialog */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent className="bg-card border-border">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-foreground">Delete Account Permanently?</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground">
-              This action cannot be undone. This will permanently delete your account,
-              all your reviews, playlists, and remove all your data from our servers.
-              <br /><br />
-              <strong className="text-destructive">Are you absolutely sure?</strong>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-border">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-              onClick={() => {
-                toast.error("Account deletion initiated. You will receive a confirmation email.");
-                setShowDeleteDialog(false);
-              }}
-            >
-              Delete Account
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Deactivate Account Confirmation Dialog */}
-      <AlertDialog open={showDeactivateDialog} onOpenChange={setShowDeactivateDialog}>
-        <AlertDialogContent className="bg-card border-border">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-foreground">Deactivate Account?</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground">
-              Your profile will be hidden from other users. You can reactivate your
-              account anytime by logging back in. Your data will be preserved.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-border">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              className="bg-destructive/80 hover:bg-destructive text-destructive-foreground"
-              onClick={() => {
-                toast.success("Account deactivated. You can reactivate anytime.");
-                setShowDeactivateDialog(false);
-              }}
-            >
-              Deactivate
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

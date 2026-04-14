@@ -136,8 +136,11 @@ export default function App() {
   const AUTH_INIT_TIMEOUT_MS = 20000; // Auth session lookup with timeout
   const PROFILE_INIT_TIMEOUT_MS = 45000; // Increased for slow network (was 30s)
 
-  const isTimeoutError = (error: unknown) =>
-    error instanceof Error && error.message.toLowerCase().includes("timed out");
+  const isTimeoutError = (error: unknown) => {
+    if (!(error instanceof Error)) return false;
+    const msg = error.message.toLowerCase();
+    return msg.includes("timed out") || msg.includes("timeout") || msg.includes("aborted");
+  };
 
   const getSessionWithRetry = async () => {
     try {
@@ -350,7 +353,9 @@ export default function App() {
         setIsAuthReady(true);
         syncProfileInBackground(sess?.user ?? null);
       } catch (e) {
-        console.error("init auth error:", e);
+        if (!isTimeoutError(e)) {
+          console.error("init auth error:", e);
+        }
         if (mounted) {
           if (window.location.search || window.location.hash || window.location.pathname !== "/") {
             window.history.replaceState({}, document.title, "/");
@@ -1079,7 +1084,7 @@ const handleSubmitReview = async (reviewData: {
             rating: editingReview.rating,
             content: editingReview.content,
             mood: editingReview.mood,
-            listeningContext: editingReview.listeningContext,
+            listeningContext: editingReview.whereListened || editingReview.listeningContext,
             favoriteTrack: editingReview.favoriteTrack,
             visibility: editingReview.visibility || "public",
           }}

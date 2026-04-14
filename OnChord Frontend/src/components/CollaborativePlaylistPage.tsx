@@ -10,28 +10,34 @@ import { UserPlus, Share2, Music, Clock, Sparkles, MessageSquare, Send, Search, 
 import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
-import { searchAlbums } from "../lib/api/musicSearch";
+import { searchTracks } from "../lib/api/musicSearch";
 import { getMutualFollows } from "../lib/api/follows";
 import { getProfiles } from "../lib/api/profiles";
 import { supabase } from "../lib/supabaseClient";
 
 const isPolicyRecursionError = (error: any): boolean => !!error && error.code === "42P17";
 
-interface Album {
+interface SearchTrackItem {
   id: string;
   title: string;
   artist: string;
   cover: string;
-  year?: string;
-  genre?: string;
+  album?: string;
+  durationMs?: number;
+  previewUrl?: string;
+  url?: string;
 }
 
 interface PlaylistTrack {
+  rowId?: string;
   id: string;
   title: string;
   artist: string;
+  durationMs?: number;
+  addedById?: string;
   addedBy: string;
   timestamp: string;
+  addedAtRaw?: string;
   cover?: string;
   albumCover?: string;
   album?: string;
@@ -70,6 +76,54 @@ interface CollaborativePlaylistPageProps {
   onOpenTrack?: (trackData: any) => void;
 }
 
+function formatRelativeTime(timestamp: string | null | undefined): string {
+  if (!timestamp) return "Just now";
+  const value = new Date(timestamp).getTime();
+  if (Number.isNaN(value)) return "Just now";
+
+  const diffMs = Date.now() - value;
+  const minutes = Math.floor(diffMs / (1000 * 60));
+  if (minutes <= 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function mapTrackRow(row: any): PlaylistTrack {
+  return {
+    rowId: String(row.id || ""),
+    id: String(row.track_id || row.id || ""),
+    title: row.track_title || "Unknown Track",
+    artist: row.track_artist || "Unknown Artist",
+    durationMs: typeof row.duration_ms === "number" ? row.duration_ms : undefined,
+    addedById: row.added_by || undefined,
+    addedBy: row.added_by_name || "Collaborator",
+    timestamp: formatRelativeTime(row.added_at),
+    addedAtRaw: row.added_at || undefined,
+    cover: row.album_cover || undefined,
+    albumCover: row.album_cover || undefined,
+    previewUrl: row.preview_url || undefined,
+    spotifyUrl: row.spotify_url || undefined,
+    appleMusicUrl: row.apple_music_url || undefined,
+  };
+}
+
+function formatDurationTotal(totalMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  if (hours <= 0) {
+    return `${minutes}m`;
+  }
+
+  return `${hours}h ${minutes}m`;
+}
+
 export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, setPlaylists, onBack, canGoBack, onOpenTrack }: CollaborativePlaylistPageProps) {
   const { profile } = useProfile();
   // Find the current playlist
@@ -91,10 +145,99 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showShareTrackModal, setShowShareTrackModal] = useState(false);
   const [tracks, setTracks] = useState<PlaylistTrack[]>((playlist?.tracks || []) as PlaylistTrack[]);
+  const [isLoadingTracks, setIsLoadingTracks] = useState(false);
+  const [isAddingTrack, setIsAddingTrack] = useState(false);
+  const [removingTrackRowId, setRemovingTrackRowId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [searchResults, setSearchResults] = useState<Album[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchTrackItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const canModifyTracks = !!currentUserId;
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setCurrentUserId(data.session?.user?.id || null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!playlist?.id) {
+      setTracks([]);
+      return;
+    }
+
+    let active = true;
+
+    async function loadTracks() {
+      setIsLoadingTracks(true);
+      try {
+        let { data, error } = await supabase
+          .from("playlist_tracks")
+          .select("id, track_id, track_title, track_artist, album_cover, duration_ms, added_by, added_by_name, added_at, position")
+          .eq("playlist_id", playlist.id)
+          .order("position", { ascending: true })
+          .order("added_at", { ascending: true });
+
+        // Backward-compatible fallback for older schemas missing duration_ms.
+        if (error && String(error.message || "").toLowerCase().includes("duration_ms")) {
+          const fallback = await supabase
+            .from("playlist_tracks")
+            .select("id, track_id, track_title, track_artist, album_cover, added_by, added_by_name, added_at, position")
+            .eq("playlist_id", playlist.id)
+            .order("position", { ascending: true })
+            .order("added_at", { ascending: true });
+
+          data = fallback.data;
+          error = fallback.error;
+        }
+
+        if (error) throw error;
+        if (!active) return;
+
+        const mapped = (data || []).map(mapTrackRow);
+        setTracks(mapped);
+
+        setPlaylists(
+          playlists.map((p) =>
+            p.id === playlist.id
+              ? {
+                  ...p,
+                  trackCount: mapped.length,
+                  lastUpdated: "Just now",
+                }
+              : p
+          )
+        );
+      } catch (error) {
+        console.error("Failed to load collaborative playlist tracks:", error);
+        if (active) setTracks([]);
+      } finally {
+        if (active) setIsLoadingTracks(false);
+      }
+    }
+
+    loadTracks();
+
+    const trackChannel = supabase
+      .channel(`playlist_tracks_${playlist.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "playlist_tracks", filter: `playlist_id=eq.${playlist.id}` },
+        () => loadTracks()
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(trackChannel);
+    };
+  }, [playlist?.id]);
   
   // Debounced album search
   useEffect(() => {
@@ -105,14 +248,16 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const results = await searchAlbums(searchQuery, 10);
+        const results = await searchTracks(searchQuery, 10);
         setSearchResults(results.map(r => ({
           id: r.id,
           title: r.title,
           artist: r.artist,
-          cover: r.cover,
-          year: r.year,
-          genre: r.genre,
+          cover: r.albumCover,
+          album: r.album,
+          durationMs: r.duration,
+          previewUrl: r.previewUrl,
+          url: r.url,
         })));
       } catch (error) {
         console.error("Search failed:", error);
@@ -149,8 +294,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
 
   // Load mutual-follow users for invite flow.
   useEffect(() => {
-    if (!profile?.id) {
-      setInviteFriends([]);
+    if (!showInviteModal) {
       return;
     }
 
@@ -190,7 +334,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     return () => {
       active = false;
     };
-  }, [profile?.id]);
+  }, [showInviteModal]);
 
   // Scroll to bottom when new messages are added
   useEffect(() => {
@@ -259,7 +403,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     }
   };
 
-  const handleShareTrack = (album: Album) => {
+  const handleShareTrack = (track: SearchTrackItem) => {
     const msg: ChatMessage = {
       id: `msg${Date.now()}`,
       userId: profile?.id || "current-user",
@@ -269,9 +413,9 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       timestamp: "Just now",
       type: "track",
       track: {
-        title: album.title,
-        artist: album.artist,
-        cover: album.cover,
+        title: track.title,
+        artist: track.artist,
+        cover: track.cover,
         rating: 0,
       },
     };
@@ -279,22 +423,83 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     setMessages((prev) => [...prev, msg]);
     setShowShareTrackModal(false);
     setSearchQuery("");
-    toast.success(`Shared "${album.title}"!`);
+    toast.success(`Shared "${track.title}"!`);
   };
 
-  const handleAddTrack = (album: Album) => {
-    const newTrack = {
-      id: `track-${Date.now()}`,
-      title: album.title,
-      artist: album.artist,
-      addedBy: profile?.display_name || profile?.username || "You",
-      timestamp: "Just now",
-    };
+  const handleAddTrack = async (track: SearchTrackItem) => {
+    if (!playlist?.id) {
+      toast.error("Playlist not found");
+      return;
+    }
 
-    setTracks([newTrack, ...tracks]);
-    setShowAddTrackModal(false);
-    setSearchQuery("");
-    toast.success(`Added "${album.title}" to the playlist!`);
+    setIsAddingTrack(true);
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const currentUserId = session.session?.user?.id;
+      if (!currentUserId) {
+        toast.error("Please sign in to add tracks");
+        return;
+      }
+
+      const nextPosition = tracks.length;
+
+      const { error } = await supabase.from("playlist_tracks").insert({
+        playlist_id: playlist.id,
+        track_id: track.id,
+        track_title: track.title,
+        track_artist: track.artist,
+        album_name: track.album || null,
+        album_cover: track.cover,
+        duration_ms: track.durationMs || null,
+        preview_url: track.previewUrl || null,
+        apple_music_url: track.url || null,
+        added_by: currentUserId,
+        added_by_name: profile?.display_name || profile?.username || session.session?.user?.email || "Collaborator",
+        added_by_avatar: profile?.avatar_url || null,
+        position: nextPosition,
+      });
+
+      if (error) throw error;
+
+      setShowAddTrackModal(false);
+      setSearchQuery("");
+      toast.success(`Added "${track.title}" to the playlist`);
+    } catch (error) {
+      console.error("Failed to add track to collaborative playlist:", error);
+      toast.error("Failed to add track. Please try again.");
+    } finally {
+      setIsAddingTrack(false);
+    }
+  };
+
+  const hasCompleteDurations = tracks.length > 0 && tracks.every((track) => typeof track.durationMs === "number" && track.durationMs > 0);
+  const totalDurationMs = hasCompleteDurations
+    ? tracks.reduce((sum, track) => sum + (track.durationMs || 0), 0)
+    : 0;
+  const durationDisplay = tracks.length === 0 ? "0m" : hasCompleteDurations ? formatDurationTotal(totalDurationMs) : "Unknown";
+
+  const handleRemoveTrack = async (track: PlaylistTrack) => {
+    if (!playlist?.id || !track.rowId) {
+      toast.error("Track cannot be removed right now");
+      return;
+    }
+
+    setRemovingTrackRowId(track.rowId);
+    try {
+      const { error } = await supabase
+        .from("playlist_tracks")
+        .delete()
+        .eq("id", track.rowId)
+        .eq("playlist_id", playlist.id);
+
+      if (error) throw error;
+      toast.success(`Removed "${track.title}"`);
+    } catch (error) {
+      console.error("Failed to remove track from collaborative playlist:", error);
+      toast.error("Failed to remove track. Please try again.");
+    } finally {
+      setRemovingTrackRowId(null);
+    }
   };
 
   // Predefined mood suggestions
@@ -384,7 +589,10 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     }
 
     const mutualFollowIds = await getMutualFollows(500, 0);
-    const mutualFollowSet = new Set(mutualFollowIds);
+    const mutualFollowSet =
+      mutualFollowIds.length > 0
+        ? new Set(mutualFollowIds)
+        : new Set(inviteFriends.map((friend) => friend.id));
     const eligibleInvitees = filteredInvitees.filter((id) => mutualFollowSet.has(id));
 
     if (eligibleInvitees.length === 0) {
@@ -632,7 +840,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                 <p className="text-sm text-muted-foreground">Contributors</p>
               </div>
               <div>
-                <p className="text-foreground">2.5h</p>
+                <p className="text-foreground">{durationDisplay}</p>
                 <p className="text-sm text-muted-foreground">Duration</p>
               </div>
             </div>
@@ -667,6 +875,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
               <Button 
                 className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg hover:scale-105 transition-all"
                 onClick={() => setShowAddTrackModal(true)}
+                disabled={!canModifyTracks}
               >
                 <Music className="w-4 h-4 mr-2" />
                 Add Track
@@ -674,9 +883,17 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
             </div>
 
             <div className="space-y-3">
+              {isLoadingTracks && (
+                <div className="text-sm text-muted-foreground">Loading tracks...</div>
+              )}
+              {!isLoadingTracks && tracks.length === 0 && (
+                <div className="text-sm text-muted-foreground border border-border rounded-lg p-4 bg-background">
+                  No tracks yet. Add songs to start this collaborative playlist.
+                </div>
+              )}
               {tracks.map((track, index) => (
                 <div
-                  key={track.id}
+                  key={track.rowId || `${track.id}-${index}`}
                   className="flex items-center gap-4 p-4 bg-background rounded-lg hover:bg-muted transition cursor-pointer animate-slide-in"
                   style={{ animationDelay: `${index * 0.1}s` }}
                   onClick={() => {
@@ -738,6 +955,26 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                     <Clock className="w-4 h-4" />
                     <span className="text-xs">{track.timestamp}</span>
                   </div>
+
+                  {/* Remove Track */}
+                  {canModifyTracks && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveTrack(track);
+                      }}
+                      disabled={removingTrackRowId === track.rowId}
+                    >
+                      {removingTrackRowId === track.rowId ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1005,7 +1242,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
           <DialogHeader>
             <DialogTitle className="text-foreground">Add Track to Playlist</DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              Search for a song or album to add to the collaborative playlist
+              Search for tracks to add to the collaborative playlist
             </DialogDescription>
           </DialogHeader>
 
@@ -1014,7 +1251,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Search for songs or albums..."
+                placeholder="Search for tracks..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 bg-background border-border"
@@ -1023,26 +1260,27 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
 
             {/* Search Results */}
             <div className="space-y-2 max-h-96 overflow-y-auto nav-scroll">
-              {searchResults.map((album) => (
+              {searchResults.map((track) => (
                 <div
-                  key={album.id}
+                  key={track.id}
                   className="flex items-center gap-4 p-3 bg-background rounded-lg hover:bg-muted transition cursor-pointer group"
                 >
                   <img
-                    src={album.cover}
-                    alt={album.title}
+                    src={track.cover}
+                    alt={track.title}
                     className="w-12 h-12 rounded object-cover"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-foreground truncate">{album.title}</p>
-                    <p className="text-sm text-muted-foreground truncate">{album.artist}</p>
+                    <p className="text-foreground truncate">{track.title}</p>
+                    <p className="text-sm text-muted-foreground truncate">{track.artist}{track.album ? ` • ${track.album}` : ""}</p>
                   </div>
                   <Button
                     size="sm"
-                    onClick={() => handleAddTrack(album)}
+                    onClick={() => handleAddTrack(track)}
+                    disabled={isAddingTrack || !canModifyTracks}
                     className="bg-primary hover:bg-primary/90 text-primary-foreground opacity-0 group-hover:opacity-100 transition-opacity"
                   >
-                    <Plus className="w-4 h-4 mr-1" />
+                    {isAddingTrack ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
                     Add
                   </Button>
                 </div>
@@ -1221,23 +1459,23 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                   <p>No tracks found</p>
                 </div>
-              ) : searchResults.map((album) => (
+              ) : searchResults.map((track) => (
                 <div
-                  key={album.id}
+                  key={track.id}
                   className="flex items-center gap-4 p-3 bg-background rounded-lg hover:bg-muted transition cursor-pointer group"
                 >
                   <img
-                    src={album.cover}
-                    alt={album.title}
+                    src={track.cover}
+                    alt={track.title}
                     className="w-12 h-12 rounded object-cover"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-foreground truncate">{album.title}</p>
-                    <p className="text-sm text-muted-foreground truncate">{album.artist}</p>
+                    <p className="text-foreground truncate">{track.title}</p>
+                    <p className="text-sm text-muted-foreground truncate">{track.artist}{track.album ? ` • ${track.album}` : ""}</p>
                   </div>
                   <Button
                     size="sm"
-                    onClick={() => handleShareTrack(album)}
+                    onClick={() => handleShareTrack(track)}
                     className="bg-primary hover:bg-primary/90 text-primary-foreground opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Share2 className="w-4 h-4 mr-1" />

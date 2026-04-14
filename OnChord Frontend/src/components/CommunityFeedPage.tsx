@@ -109,12 +109,17 @@ export function CommunityFeedPage({ onOpenAlbum }: CommunityFeedPageProps = {}) 
     setDeleteDialogOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (reviewToDelete) {
-      deleteReview(reviewToDelete.id);
-      toast.success("Review deleted successfully");
-      setDeleteDialogOpen(false);
-      setReviewToDelete(null);
+      try {
+        await deleteReview(reviewToDelete.id);
+        toast.success("Review deleted successfully");
+        setDeleteDialogOpen(false);
+        setReviewToDelete(null);
+      } catch (error) {
+        console.error("Failed to delete review:", error);
+        toast.error("Failed to delete review");
+      }
     }
   };
 

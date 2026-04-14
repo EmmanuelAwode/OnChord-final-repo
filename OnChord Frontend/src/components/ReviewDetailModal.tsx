@@ -336,33 +336,37 @@ export function ReviewDetailModal({
             <span>{review.comments}</span>
           </button>
 
-          {/* Edit/Delete for owner */}
-          {review.userId === (window.currentUser?.id || window.localStorage.getItem('userId')) && (
+          {/* Edit/Delete actions when callbacks are provided by parent */}
+          {(onEditReview || onDeleteReview) && (
             <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto border-border hover:border-primary hover:text-primary"
-                onClick={() => {
-                  onClose();
-                  window.onEditReview?.(review);
-                }}
-              >
-                Edit
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="border-border ml-2"
-                onClick={() => {
-                  if (window.confirm('Are you sure you want to delete this review?')) {
-                    window.onDeleteReview?.(review.id);
+              {onEditReview && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto border-border hover:border-primary hover:text-primary"
+                  onClick={() => {
                     onClose();
-                  }
-                }}
-              >
-                Delete
-              </Button>
+                    onEditReview(review);
+                  }}
+                >
+                  Edit
+                </Button>
+              )}
+              {onDeleteReview && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="border-border ml-2"
+                  onClick={() => {
+                    if (window.confirm("Are you sure you want to delete this review?")) {
+                      onDeleteReview(review.id);
+                      onClose();
+                    }
+                  }}
+                >
+                  Delete
+                </Button>
+              )}
             </>
           )}
         </div>

@@ -346,8 +346,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
 
   // Fetch invite candidates (mutual follows only)
   useEffect(() => {
-    if (!profile?.id) {
-      setFriends([]);
+    if (!showCreateModal) {
       return;
     }
 
@@ -389,7 +388,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
     return () => {
       active = false;
     };
-  }, [profile?.id]);
+  }, [showCreateModal]);
 
   const toggleFriendSelection = (friendId: string) => {
     setSelectedFriends(prev =>
@@ -410,7 +409,10 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
     }
 
     const mutualFollowIds = await getMutualFollows(500, 0);
-    const mutualFollowSet = new Set(mutualFollowIds);
+    const mutualFollowSet =
+      mutualFollowIds.length > 0
+        ? new Set(mutualFollowIds)
+        : new Set(friends.map((friend) => friend.id));
     const eligibleSelectedFriends = selectedFriends.filter((id) => mutualFollowSet.has(id));
 
     if (eligibleSelectedFriends.length === 0) {

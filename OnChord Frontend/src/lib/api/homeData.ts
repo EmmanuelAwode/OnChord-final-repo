@@ -66,6 +66,7 @@ const topArtistsCache: { data: any[] | null; timestamp: number } = {
   data: null,
   timestamp: 0,
 };
+let hasLoggedTopArtistsTimeout = false;
 let spotifyReconnectRequired = false;
 let hasLoggedReconnectRequirement = false;
 
@@ -78,6 +79,11 @@ function isSpotifyReconnectError(error: unknown): boolean {
     message.includes("reconnect your spotify account") ||
     message.includes("session expired")
   );
+}
+
+function isTimeoutError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+  return message.includes("timeout") || message.includes("timed out");
 }
 
 async function getTopArtistsForPersonalization(limit: number = 15): Promise<any[]> {
@@ -115,8 +121,13 @@ async function getTopArtistsForPersonalization(limit: number = 15): Promise<any[
           console.warn("Spotify session error detected. Personalization will pause until Spotify is reconnected.");
           hasLoggedReconnectRequirement = true;
         }
+      } else if (isTimeoutError(err)) {
+        if (!hasLoggedTopArtistsTimeout) {
+          console.warn("Spotify top artists request timed out. Using fallback personalization.");
+          hasLoggedTopArtistsTimeout = true;
+        }
       } else {
-        console.error("Failed to get Spotify top artists:", err);
+        console.warn("Failed to get Spotify top artists. Using fallback personalization.");
       }
       return [];
     } finally {

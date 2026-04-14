@@ -81,6 +81,7 @@ function normaliseAlbum(raw: any) {
       _isSpotify: true,
       // Treat Spotify 'single' or 'compilation' with 1 track as a single
       _isSong: raw.album_type === "single" || (raw.album_type !== "album" && (raw.total_tracks || raw.tracks?.total || 0) === 1),
+      _releaseType: raw.album_type || "album",
     };
   }
 
@@ -105,6 +106,7 @@ function normaliseAlbum(raw: any) {
     _isSong: raw.type === "track" || raw.type === "single" ||
              raw.album_type === "single" ||
              String(raw.albumTitle || raw.title || "").toLowerCase().endsWith("- single"),
+    _releaseType: raw.album_type || raw.type || "album",
   };
 }
 
@@ -176,19 +178,35 @@ export function AlbumModal({ isOpen, onClose, albumData, loading, onOpenReviewMo
 
   const reviewCount = albumReviews.length;
 
-  const { isAlbumFavourite, toggleAlbum } = useFavourites();
-  const isFavourite = album ? isAlbumFavourite(album.id) : false;
+  const { isAlbumFavourite, isSongFavourite, toggleAlbum, toggleSong } = useFavourites();
+  const singleTrack = album?.tracks?.[0];
+  const singleSongId = singleTrack?.id || album?.id || "";
+  const isFavourite = album
+    ? album._isSong
+      ? isSongFavourite(singleSongId)
+      : isAlbumFavourite(album.id)
+    : false;
 
   const handleToggleFavourite = () => {
     if (!album) return;
-    const added = toggleAlbum({
-      id: album.id,
-      title: album.title,
-      artist: album.artist,
-      cover: album.cover,
-      releaseDate: album.year,
-      trackCount: album.trackCount,
-    });
+    const added = album._isSong
+      ? toggleSong({
+          id: singleSongId,
+          title: singleTrack?.name || album.title,
+          artist: singleTrack?.artists || album.artist,
+          albumId: album.id,
+          albumCover: album.cover,
+          duration: typeof singleTrack?.duration_ms === "number" ? formatTrackDuration(singleTrack.duration_ms) : undefined,
+        })
+      : toggleAlbum({
+          id: album.id,
+          title: album.title,
+          artist: album.artist,
+          cover: album.cover,
+          releaseDate: album.year,
+          trackCount: album.trackCount,
+          releaseType: album._releaseType,
+        });
 
     toast.success(
       added

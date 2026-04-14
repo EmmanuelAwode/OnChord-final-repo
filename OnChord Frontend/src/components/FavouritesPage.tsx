@@ -72,7 +72,7 @@ export function FavouritesPage({ onOpenAlbum }: FavouritesPageProps) {
         <div>
           <h1 className="mb-1">Favourites</h1>
           <p className="text-muted-foreground text-sm">
-            Your most loved songs and albums
+            Your most loved songs, albums, and EPs
           </p>
         </div>
       </div>
@@ -93,7 +93,7 @@ export function FavouritesPage({ onOpenAlbum }: FavouritesPageProps) {
             <Disc3 className="w-5 h-5 text-secondary" />
             <div>
               <p className="text-2xl text-foreground">{favourites.albums.length}</p>
-              <p className="text-xs text-muted-foreground">Favourite Albums</p>
+              <p className="text-xs text-muted-foreground">Favourite Albums/EPs</p>
             </div>
           </div>
         </Card>
@@ -114,7 +114,7 @@ export function FavouritesPage({ onOpenAlbum }: FavouritesPageProps) {
             className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground flex items-center gap-2 py-2"
           >
             <Disc3 className="w-4 h-4" />
-            Albums ({favourites.albums.length})
+            Albums/EPs ({favourites.albums.length})
           </TabsTrigger>
         </TabsList>
 
@@ -276,8 +276,8 @@ export function FavouritesPage({ onOpenAlbum }: FavouritesPageProps) {
           ) : (
             <EmptyState
               icon={Disc3}
-              title="No Favourite Albums"
-              description="Albums you mark as favourites will appear here. Discover and save your favorites!"
+              title="No Favourite Albums/EPs"
+              description="Albums and EPs you mark as favourites will appear here. Discover and save your favorites!"
             />
           )}
         </TabsContent>
