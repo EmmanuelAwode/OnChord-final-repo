@@ -14,6 +14,7 @@ import { searchTracks } from "../lib/api/musicSearch";
 import { getMutualFollows } from "../lib/api/follows";
 import { getProfiles } from "../lib/api/profiles";
 import { supabase } from "../lib/supabaseClient";
+import { respondToPlaylistInvite } from "../lib/api/collaborativeInvites";
 
 const isPolicyRecursionError = (error: any): boolean => !!error && error.code === "42P17";
 
@@ -74,6 +75,12 @@ interface CollaborativePlaylistPageProps {
   onBack?: () => void;
   canGoBack?: boolean;
   onOpenTrack?: (trackData: any) => void;
+  pendingInvite?: {
+    playlistId: string;
+    notificationId: string;
+    title?: string;
+  };
+  onInviteResolved?: () => void;
 }
 
 function formatRelativeTime(timestamp: string | null | undefined): string {
@@ -124,10 +131,25 @@ function formatDurationTotal(totalMs: number): string {
   return `${hours}h ${minutes}m`;
 }
 
-export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, setPlaylists, onBack, canGoBack, onOpenTrack }: CollaborativePlaylistPageProps) {
+export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, setPlaylists, onBack, canGoBack, onOpenTrack, pendingInvite, onInviteResolved }: CollaborativePlaylistPageProps) {
   const { profile } = useProfile();
-  // Find the current playlist
-  const playlist = playlists.find(p => p.id === playlistId) || playlists[0];
+  const [inviteResponseLoading, setInviteResponseLoading] = useState(false);
+  const [hasAcceptedInvite, setHasAcceptedInvite] = useState(false);
+  const playlistFromStore = playlists.find(p => p.id === playlistId) || playlists[0];
+  const playlist = playlistFromStore || (
+    pendingInvite?.playlistId === playlistId
+      ? {
+          id: playlistId || pendingInvite.playlistId,
+          title: pendingInvite.title || "Playlist collaboration invite",
+          description: "You have been invited to collaborate on this playlist.",
+          cover: `https://api.dicebear.com/7.x/shapes/svg?seed=${playlistId || pendingInvite.playlistId}`,
+          contributors: [],
+          moods: [],
+          trackCount: 0,
+          pendingInviteCount: 0,
+        }
+      : undefined
+  );
   const [newMessage, setNewMessage] = useState("");
   const [showAddTrackModal, setShowAddTrackModal] = useState(false);
   const [showAddMoodModal, setShowAddMoodModal] = useState(false);
@@ -153,7 +175,9 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const [searchResults, setSearchResults] = useState<SearchTrackItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const canModifyTracks = !!currentUserId;
+  const isCurrentUserContributor = !!currentUserId && !!playlist?.contributors?.some((c: any) => c.id === currentUserId);
+  const isPendingInvite = !!pendingInvite && pendingInvite.playlistId === (playlist?.id || playlistId) && !isCurrentUserContributor && !hasAcceptedInvite;
+  const canModifyTracks = !!currentUserId && (isCurrentUserContributor || hasAcceptedInvite);
 
   useEffect(() => {
     let active = true;
@@ -238,6 +262,11 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       supabase.removeChannel(trackChannel);
     };
   }, [playlist?.id]);
+    useEffect(() => {
+      if (isCurrentUserContributor) {
+        setHasAcceptedInvite(true);
+      }
+    }, [isCurrentUserContributor]);
   
   // Debounced album search
   useEffect(() => {
@@ -427,6 +456,50 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   };
 
   const handleAddTrack = async (track: SearchTrackItem) => {
+      const handleInviteDecision = async (decision: "accept" | "decline") => {
+        if (!pendingInvite?.notificationId) {
+          toast.error("Invite details are missing");
+          return;
+        }
+
+        setInviteResponseLoading(true);
+        try {
+          if (decision === "accept") {
+            await respondToPlaylistInvite(pendingInvite.notificationId, "accept");
+            setHasAcceptedInvite(true);
+            setPlaylists((prev) =>
+              prev.map((p) =>
+                p.id === (playlist?.id || playlistId)
+                  ? {
+                      ...p,
+                      contributors: Array.from(
+                        new Map([
+                          ...(p.contributors || []).map((c: any) => [c.id, c]),
+                          [profile?.id || currentUserId || "current-user", {
+                            id: profile?.id || currentUserId || "current-user",
+                            name: profile?.display_name || profile?.username || "You",
+                            avatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=user`,
+                          }],
+                        ])
+                      ).map(([, value]) => value),
+                    }
+                  : p
+              )
+            );
+            toast.success("Invite accepted");
+          } else {
+            await respondToPlaylistInvite(pendingInvite.notificationId, "decline");
+            toast.success("Invite declined");
+            onInviteResolved?.();
+            onNavigate?.("playlist");
+          }
+        } catch (error) {
+          console.error("Failed to respond to invite:", error);
+          toast.error("Could not process invite response");
+        } finally {
+          setInviteResponseLoading(false);
+        }
+      };
     if (!playlist?.id) {
       toast.error("Playlist not found");
       return;

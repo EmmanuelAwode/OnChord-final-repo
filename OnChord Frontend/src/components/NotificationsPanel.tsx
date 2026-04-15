@@ -12,6 +12,7 @@ import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { supabase } from '../lib/supabaseClient';
 import { isMutualFollow } from '../lib/api/follows';
+import { respondToPlaylistInvite as respondToPlaylistInviteRpc } from '../lib/api/collaborativeInvites';
 import { toast } from 'sonner';
 
 const isPolicyRecursionError = (error: any): boolean => !!error && error.code === '42P17';
@@ -93,94 +94,9 @@ export default function NotificationsPanel() {
           toast.error('You can only collaborate with users who follow you back.');
           return;
         }
-
-        // Legacy-first path: avoids recursive policy tables while migration is pending.
-        let acceptedViaLegacyTable = false;
-
-        const { data: legacyPlaylistRow, error: legacyPlaylistError } = await supabase
-          .from('playlists')
-          .select('id, collaborators')
-          .eq('id', notification.playlistId)
-          .maybeSingle();
-
-        if (!legacyPlaylistError && legacyPlaylistRow?.id) {
-          const existingCollaborators: string[] = Array.isArray(legacyPlaylistRow.collaborators)
-            ? legacyPlaylistRow.collaborators
-            : [];
-
-          const updatedCollaborators = Array.from(new Set([...existingCollaborators, currentUserId]));
-
-          const { error: legacyUpdateError } = await supabase
-            .from('playlists')
-            .update({ collaborators: updatedCollaborators })
-            .eq('id', notification.playlistId);
-
-          if (legacyUpdateError) {
-            throw legacyUpdateError;
-          }
-
-          acceptedViaLegacyTable = true;
-        }
-
-        if (!acceptedViaLegacyTable) {
-          const { error: contributorError } = await supabase
-            .from('playlist_collaborators')
-            .upsert(
-              {
-                playlist_id: notification.playlistId,
-                user_id: currentUserId,
-                role: 'contributor',
-              },
-              { onConflict: 'playlist_id,user_id' }
-            );
-
-          if (contributorError) {
-            if (isPolicyRecursionError(contributorError)) {
-              throw contributorError;
-            }
-
-            const { error: contributorsTableError } = await supabase
-              .from('playlist_contributors')
-              .upsert(
-                {
-                  playlist_id: notification.playlistId,
-                  user_id: currentUserId,
-                },
-                { onConflict: 'playlist_id,user_id' }
-              );
-
-            if (contributorsTableError) throw contributorError;
-          }
-        }
       }
 
-      await markAsRead(notification.id);
-
-      if (notification.actionUserId) {
-        const { data: myProfile } = await supabase
-          .from('profiles')
-          .select('display_name, username, avatar_url')
-          .eq('id', currentUserId)
-          .maybeSingle();
-
-        const responderName = myProfile?.display_name || myProfile?.username || 'A collaborator';
-        const responderAvatar = myProfile?.avatar_url || null;
-
-        await supabase.from('notifications').insert({
-          user_id: notification.actionUserId,
-          type: 'mention',
-          title: decision === 'accept' ? 'Invite accepted' : 'Invite declined',
-          message:
-            decision === 'accept'
-              ? `${responderName} accepted your invite to \"${playlistTitle}\".`
-              : `${responderName} declined your invite to \"${playlistTitle}\".`,
-          action_user_id: currentUserId,
-          action_user_name: responderName,
-          action_user_avatar: responderAvatar,
-          playlist_id: notification.playlistId || null,
-          is_read: false,
-        });
-      }
+      await respondToPlaylistInviteRpc(notification.id, decision);
 
       toast.success(decision === 'accept' ? 'Joined playlist' : 'Invite declined');
     } catch (error) {
@@ -225,6 +141,20 @@ export default function NotificationsPanel() {
     // Mark as read
     if (!notification.isRead) {
       await markAsRead(notification.id);
+    }
+
+    if (notification.type === 'playlist_invite' && notification.playlistId) {
+      window.dispatchEvent(
+        new CustomEvent('onchord-open-playlist-invite', {
+          detail: {
+            playlistId: notification.playlistId,
+            notificationId: notification.id,
+            title: notification.title,
+          },
+        })
+      );
+      setIsOpen(false);
+      return;
     }
 
     // Navigate to relevant page

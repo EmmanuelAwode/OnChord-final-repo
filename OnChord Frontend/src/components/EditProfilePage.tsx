@@ -12,10 +12,8 @@ import {
   Camera, 
   Mail, 
   MapPin, 
-  Link as LinkIcon, 
   Music,
   CheckCircle2,
-  XCircle,
   Loader2
 } from "lucide-react";
 import { useProfile } from "../lib/useProfile";
@@ -37,11 +35,9 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [location, setLocation] = useState("San Francisco, CA");
-  const [website, setWebsite] = useState("onchord.music");
   const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [isLoadingSpotifyConnection, setIsLoadingSpotifyConnection] = useState(true);
   const [isUpdatingSpotifyConnection, setIsUpdatingSpotifyConnection] = useState(false);
-  const [appleMusicConnected, setAppleMusicConnected] = useState(false);
   const [publicProfile, setPublicProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [usernameError, setUsernameError] = useState("");
@@ -57,6 +53,26 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
       setOriginalUsername(profile.username || "");
       setBio(profile.bio || "");
       setAvatarUrl(profile.avatar_url || "");
+
+      // Treat profile as public only if the user currently has any public/friends reviews.
+      // This ensures the toggle reflects server-side visibility behavior.
+      void (async () => {
+        try {
+          const { data: session } = await supabase.auth.getSession();
+          const userId = session.session?.user?.id;
+          if (!userId) return;
+
+          const { count } = await supabase
+            .from("reviews")
+            .select("id", { count: "exact", head: true })
+            .eq("uid", userId)
+            .in("visibility", ["public", "friends"]);
+
+          setPublicProfile((count ?? 0) > 0);
+        } catch {
+          setPublicProfile(true);
+        }
+      })();
     }
   }, [profile]);
 
@@ -184,12 +200,32 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
 
     setIsSaving(true);
     try {
+      const { data: session } = await supabase.auth.getSession();
+      const userId = session.session?.user?.id;
+
       await updateProfile({
         display_name: name,
         username: username,
         bio: bio,
         avatar_url: avatarUrl,
       });
+
+      // Privacy toggle behavior: when turned off, hide this user's content
+      // from feed/community by making all non-private reviews private.
+      if (!publicProfile && userId) {
+        const { error: privacyError } = await supabase
+          .from("reviews")
+          .update({
+            visibility: "private",
+            is_public: false,
+          })
+          .eq("uid", userId)
+          .in("visibility", ["public", "friends"]);
+
+        if (privacyError) {
+          throw privacyError;
+        }
+      }
       
       toast.success("Profile updated successfully!");
       
@@ -355,20 +391,6 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
               />
             </div>
           </div>
-
-          <div>
-            <Label htmlFor="website">Website</Label>
-            <div className="relative mt-1">
-              <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                id="website"
-                value={website}
-                onChange={(e) => setWebsite(e.target.value)}
-                placeholder="yourwebsite.com"
-                className="pl-10"
-              />
-            </div>
-          </div>
         </div>
       </Card>
 
@@ -418,46 +440,10 @@ export function EditProfilePage({ onNavigate, onBack, canGoBack }: EditProfilePa
             )}
           </div>
 
-          {/* Apple Music */}
-          <div className="flex items-center justify-between p-4 bg-background rounded-lg border border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-[#FA233B] to-[#d91e31] rounded-lg flex items-center justify-center shadow-md">
-                <Music className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <p className="text-foreground font-medium">Apple Music</p>
-                <p className="text-xs text-muted-foreground">
-                  {appleMusicConnected ? "Connected" : "Not connected"}
-                </p>
-              </div>
-            </div>
-            {appleMusicConnected ? (
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-secondary" />
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setAppleMusicConnected(false)}
-                  className="border-destructive text-destructive hover:bg-destructive hover:text-white"
-                >
-                  Disconnect
-                </Button>
-              </div>
-            ) : (
-              <Button 
-                size="sm"
-                onClick={() => setAppleMusicConnected(true)}
-                className="bg-[#FA233B] hover:bg-[#d91e31] text-white"
-              >
-                Connect
-              </Button>
-            )}
-          </div>
-
           <div className="flex items-center gap-2 p-3 bg-secondary/10 rounded-lg border border-secondary/20">
             <Mail className="w-4 h-4 text-secondary" />
             <p className="text-sm text-muted-foreground">
-              Connect your music accounts to unlock personalized insights and seamless playlist syncing
+              Connect your Spotify account to unlock personalized insights and seamless playlist syncing
             </p>
           </div>
         </div>

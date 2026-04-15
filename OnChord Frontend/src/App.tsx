@@ -72,6 +72,11 @@ export default function App() {
   const [selectedAlbumData, setSelectedAlbumData] = useState<any>(null);
   const [albumModalLoading, setAlbumModalLoading] = useState(false);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | undefined>(undefined);
+  const [pendingPlaylistInvite, setPendingPlaylistInvite] = useState<{
+    playlistId: string;
+    notificationId: string;
+    title?: string;
+  } | null>(null);
   const [editingReview, setEditingReview] = useState<any>(null);
 
   // ============================================================================
@@ -562,8 +567,32 @@ export default function App() {
 
   const handleOpenPlaylist = (playlistId: string) => {
     setSelectedPlaylistId(playlistId);
+    setPendingPlaylistInvite(null);
     navigate("playlist-detail");
   };
+
+  useEffect(() => {
+    const handleOpenPlaylistInvite = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        playlistId?: string;
+        notificationId?: string;
+        title?: string;
+      }>;
+
+      if (!customEvent.detail?.playlistId) return;
+
+      setSelectedPlaylistId(customEvent.detail.playlistId);
+      setPendingPlaylistInvite({
+        playlistId: customEvent.detail.playlistId,
+        notificationId: customEvent.detail.notificationId || "",
+        title: customEvent.detail.title,
+      });
+      navigate("playlist-detail");
+    };
+
+    window.addEventListener("onchord-open-playlist-invite", handleOpenPlaylistInvite);
+    return () => window.removeEventListener("onchord-open-playlist-invite", handleOpenPlaylistInvite);
+  }, [navigate]);
 
   const handleLogout = async () => {
     // Force-clear all local state first so we don't get stuck
@@ -810,6 +839,8 @@ const handleSubmitReview = async (reviewData: {
             onBack={goBack}
             canGoBack={canGoBack}
             onOpenTrack={handleOpenAlbumModal}
+            pendingInvite={pendingPlaylistInvite || undefined}
+            onInviteResolved={() => setPendingPlaylistInvite(null)}
           />
         );
       case "review":

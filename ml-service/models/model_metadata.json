@@ -1,6 +1,6 @@
 {
-  "model_type": "DecisionTree",
-  "scaler_type": "StandardScaler",
+  "model_name": "RandomForest",
+  "timestamp": "20260415_002354",
   "features": [
     "danceability",
     "energy",
@@ -20,22 +20,19 @@
     "Focus",
     "Party"
   ],
-  "train_file": "tracks_features.csv",
-  "test_file": "SpotifyFeatures.csv",
-  "train_samples": 1204025,
-  "test_samples": 202044,
-  "accuracy": 0.9999604046643306,
-  "f1_macro": 0.999938029852429,
-  "f1_weighted": 0.9999604101690097,
-  "feature_importances": {
-    "danceability": 0.08970024302255808,
-    "energy": 0.4764443726411139,
-    "valence": 0.22007488335058084,
-    "acousticness": 0.0510138555266175,
-    "instrumentalness": 0.08392234946213098,
-    "liveness": 0.0,
-    "speechiness": 0.0055812370313645535,
-    "tempo": 0.07326305896563413
+  "metrics": {
+    "accuracy": 0.9414,
+    "f1_macro": 0.9274979143904691,
+    "f1_weighted": 0.9416502929635381
   },
-  "trained_at": "2026-02-24T16:25:05.797869"
+  "feature_importances": {
+    "danceability": 0.10047071603220996,
+    "energy": 0.2485383384187767,
+    "valence": 0.29078531540351393,
+    "acousticness": 0.10897725240631642,
+    "instrumentalness": 0.07492568742166841,
+    "liveness": 0.015049498182701154,
+    "speechiness": 0.04080105139930959,
+    "tempo": 0.12045214073550377
+  }
 }

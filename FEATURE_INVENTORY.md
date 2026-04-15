@@ -326,3 +326,82 @@ OnChord is a functioning social music discovery platform with strong core featur
 
 For an examiner: clearly frame incomplete features (notifications, activity feed) as "Phase 2 infrastructure" not as bugs. The app delivers on its core promise: finding music, discovering similar users, reviewing music socially, and collaborating on playlists with real-time sync.
 
+---
+
+## 10. REUSABLE UAT EXECUTION TEMPLATE (APRIL 15)
+
+Use this template for every manual UAT pass so results are consistent and chapter-ready.
+
+### Test Run Metadata
+- Run ID:
+- Date/Time:
+- Tester(s):
+- Build/Commit:
+- Environment: Local / Staging / Production-like
+- Database State: Migrations applied through:
+- Test Accounts Used:
+
+### Preconditions Checklist
+- [ ] Frontend starts without runtime error.
+- [ ] Supabase project is linked and latest migrations are applied.
+- [ ] At least two test users exist for collaborative flow checks.
+- [ ] ML service is reachable (or fallback mode intentionally tested).
+
+### UAT Scenario Matrix
+| Scenario ID | Flow | Steps Summary | Expected Result | Actual Result | Pass/Fail | Evidence |
+|---|---|---|---|---|---|---|
+| UAT-01 | Auth | Login/logout/session restore | Session persists and restores cleanly |  |  | Screenshot/log |
+| UAT-02 | Profile | Edit profile + save + reload | Changes persist and render correctly |  |  | Screenshot/log |
+| UAT-03 | Privacy | Toggle privacy and verify visibility | User content hidden according to privacy setting |  |  | Screenshot/log |
+| UAT-04 | Reviews CRUD | Create/edit/delete review | All CRUD actions succeed without stale UI |  |  | Screenshot/log |
+| UAT-05 | Social | Follow/unfollow/block | Relationship state updates correctly in UI and DB |  |  | Screenshot/log |
+| UAT-06 | Messaging | Send text + track embed preview | Message appears in both sessions; preview works |  |  | Screenshot/log |
+| UAT-07 | Collaborative Invite | Invite click-through accept/decline | Invite opens detail page; decision resolves invite |  |  | Screenshot/log |
+| UAT-08 | Collaborative Tracks | Add/remove tracks from two accounts | Realtime sync works for both users without refresh |  |  | Screenshot/log |
+| UAT-09 | Discover/Insights | Mood/trending/insights pages | Data loads and page remains usable |  |  | Screenshot/log |
+| UAT-10 | Events | Search events + set/delete reminder | Reminder lifecycle works correctly |  |  | Screenshot/log |
+
+### Defect Log
+| Defect ID | Scenario ID | Severity (High/Med/Low) | Description | Repro Steps | Status | Owner |
+|---|---|---|---|---|---|---|
+
+### Sign-Off Gate
+- [ ] No high-severity defects open.
+- [ ] Core demo flows pass (auth, reviews, messaging, collaborative playlists).
+- [ ] Known limitations documented for presentation.
+- [ ] Evidence archived (screenshots, terminal output, commit hash).
+
+### Final Verdict
+- UAT Result: PASS / PASS WITH CAVEATS / FAIL
+- Caveats:
+- Next Actions:
+
+---
+
+## 11. APRIL 15 COMPLETION CHECKPOINT
+
+### Step 1: Invite RPC Migration
+- `npx supabase link --project-ref kyhvtuxtrdhizizkqqrb` completed successfully.
+- `npx supabase db query --linked -f supabase/migrations/022_respond_to_playlist_invite_rpc.sql` executed against linked project.
+- Validation query confirmed function exists:
+	- `select proname from pg_proc where proname = 'respond_to_playlist_invite';`
+	- Result: `respond_to_playlist_invite`
+
+### Step 2: ML Artifact Regeneration
+- Trained RandomForest model artifact with:
+	- `python run_training.py --sample 50000 --rf-only`
+- Output confirmed:
+	- `models/mood_classifier_randomforest.joblib`
+
+### Step 3: ML Test Re-Run
+- Command:
+	- `pytest tests/test_ml_models.py -v`
+- Result:
+	- `21 passed`
+
+### Current Testing Status
+- Frontend quality checks (typecheck/lint/test/build): PASS
+- ML model tests: PASS
+- Collaborative invite RPC existence in DB: VERIFIED
+- Final completion depends on executing and recording full two-account UAT scenarios in Section 10.
+
