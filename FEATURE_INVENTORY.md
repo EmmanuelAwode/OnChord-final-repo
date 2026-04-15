@@ -405,3 +405,15 @@ Use this template for every manual UAT pass so results are consistent and chapte
 - Collaborative invite RPC existence in DB: VERIFIED
 - Final completion depends on executing and recording full two-account UAT scenarios in Section 10.
 
+---
+
+## 12. APRIL 15 CI CONFIRMATION
+
+- Commit `dbab61a` (`feat: Implement playlist invite response functionality`) passed GitHub Actions CI.
+- Workflow `.github/workflows/ci.yml` jobs status:
+	- `frontend`: PASS
+	- `ml-service`: PASS
+- Post-repair migration validation:
+	- `supabase_migrations.schema_migrations` contains versions `001` through `022`.
+	- `npx supabase db push --yes` reports: `Remote database is up to date.`
+
