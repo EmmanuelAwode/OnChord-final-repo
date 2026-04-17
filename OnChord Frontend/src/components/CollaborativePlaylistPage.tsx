@@ -196,7 +196,9 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const trackMetadataCacheRef = useRef<Record<string, Partial<PlaylistTrack>>>({});
+  const creatorId = String(playlist?.creatorId || playlist?.creator_id || playlist?.created_by || "");
   const isCurrentUserContributor = !!currentUserId && !!playlist?.contributors?.some((c: any) => c.id === currentUserId);
+  const isPlaylistCreator = !!currentUserId && !!creatorId && currentUserId === creatorId;
   const isPendingInvite = !!pendingInvite && pendingInvite.playlistId === (playlist?.id || playlistId) && !isCurrentUserContributor && !hasAcceptedInvite;
   const canModifyTracks = !!currentUserId && (isCurrentUserContributor || hasAcceptedInvite);
 
@@ -754,6 +756,11 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       return;
     }
 
+    if (!isPlaylistCreator) {
+      toast.error("Only the playlist creator can invite collaborators");
+      return;
+    }
+
     if (selectedInvitees.length === 0) {
       toast.error("Select at least one person to invite");
       return;
@@ -987,30 +994,45 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                     <Avatar className="w-10 h-10 border-2 border-primary shadow-md hover:shadow-lg transition-shadow">
                       <img src={contributor.avatar} alt={contributor.name} className="object-cover" />
                     </Avatar>
+                    {contributor.id === creatorId && (
+                      <div className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground shadow">
+                        Creator
+                      </div>
+                    )}
                     {/* Tooltip */}
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-lg">
                       {contributor.name}
                     </div>
                   </div>
                 ))}
-                <button
-                  onClick={() => setShowInviteModal(true)}
-                  className="w-10 h-10 rounded-full border-2 border-dashed border-primary flex items-center justify-center hover:bg-primary/10 transition shadow-md hover:shadow-lg"
-                >
-                  <UserPlus className="w-4 h-4 text-primary" />
-                </button>
+                {isPlaylistCreator ? (
+                  <button
+                    onClick={() => setShowInviteModal(true)}
+                    className="w-10 h-10 rounded-full border-2 border-dashed border-primary flex items-center justify-center hover:bg-primary/10 transition shadow-md hover:shadow-lg"
+                  >
+                    <UserPlus className="w-4 h-4 text-primary" />
+                  </button>
+                ) : (
+                  <div className="text-xs text-muted-foreground px-2">Only the creator can add people</div>
+                )}
               </div>
             </div>
 
             {/* Actions */}
             <div className="flex flex-wrap gap-3">
-              <Button
-                className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg hover:scale-105 transition-all"
-                onClick={() => setShowInviteModal(true)}
-              >
-                <UserPlus className="w-4 h-4 mr-2" />
-                Invite Friends
-              </Button>
+              {isPlaylistCreator ? (
+                <Button
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg hover:scale-105 transition-all"
+                  onClick={() => setShowInviteModal(true)}
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Invite Friends
+                </Button>
+              ) : (
+                <Button variant="outline" className="border-border text-muted-foreground" disabled>
+                  Only creator can invite
+                </Button>
+              )}
               <Button variant="outline" className="border-border">
                 <Share2 className="w-4 h-4 mr-2" />
                 Share

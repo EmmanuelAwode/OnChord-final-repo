@@ -128,6 +128,7 @@ export function YourSpacePage({
     cover: playlist?.cover || playlist?.cover_url || playlist?.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${String(playlist?.id || Date.now())}`,
     moods: Array.isArray(playlist?.moods) ? playlist.moods : [],
     contributors: Array.isArray(playlist?.contributors) ? playlist.contributors : [],
+    creatorId: String(playlist?.creatorId || playlist?.creator_id || playlist?.created_by || ""),
     trackCount: Number(playlist?.trackCount || playlist?.track_count || playlist?.tracks_count || 0),
     lastUpdated: playlist?.lastUpdated || playlist?.updated_at || "Just now",
   });
@@ -150,6 +151,7 @@ export function YourSpacePage({
       title?: string;
       description?: string;
       cover?: string;
+      moods?: string[];
       contributors?: Array<{ id: string; name: string; avatar?: string }>;
     }
   ) => {
@@ -158,27 +160,35 @@ export function YourSpacePage({
     }
 
     const now = new Date().toISOString();
+    const currentPlaylist = collaborativePlaylists.find((playlist) => playlist.id === playlistId);
+    const creatorId = String(currentPlaylist?.creatorId || profile.id);
     const contributorIds = Array.from(
       new Set([
+        creatorId,
         profile.id,
         ...(updates.contributors || []).map((contributor) => contributor.id).filter(Boolean),
       ])
     );
 
-    const modernPayload = {
-      name: updates.title,
-      description: updates.description,
-      cover_image: updates.cover,
-      updated_at: now,
-    };
+    const modernPayload: Record<string, unknown> = { updated_at: now };
+    const legacyPayload: Record<string, unknown> = { updated_at: now, collaborators: contributorIds };
 
-    const legacyPayload = {
-      name: updates.title,
-      description: updates.description,
-      cover_image: updates.cover,
-      collaborators: contributorIds,
-      updated_at: now,
-    };
+    if (updates.title !== undefined) {
+      modernPayload.name = updates.title;
+      legacyPayload.name = updates.title;
+    }
+    if (updates.description !== undefined) {
+      modernPayload.description = updates.description;
+      legacyPayload.description = updates.description;
+    }
+    if (updates.cover !== undefined) {
+      modernPayload.cover_image = updates.cover;
+      legacyPayload.cover_image = updates.cover;
+    }
+    if (updates.moods !== undefined) {
+      modernPayload.moods = updates.moods;
+      legacyPayload.moods = updates.moods;
+    }
 
     const updateAttempts = [
       () => supabase.from("collaborative_playlists").update(modernPayload).eq("id", playlistId),
@@ -232,7 +242,7 @@ export function YourSpacePage({
         console.warn("Failed to persist playlist_contributors:", contributorUpsertError);
       }
 
-      const removedContributorIds = previousContributorIds.filter((id) => !contributorIds.includes(id));
+      const removedContributorIds = previousContributorIds.filter((id) => id !== creatorId && !contributorIds.includes(id));
 
       for (const userId of removedContributorIds) {
         await supabase.from("playlist_collaborators").delete().eq("playlist_id", playlistId).eq("user_id", userId);
@@ -426,7 +436,8 @@ export function YourSpacePage({
       cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${String(row.id || Date.now())}`,
       moods: Array.isArray(row.moods) ? row.moods : [],
       contributors: [] as Array<{ id: string; name: string; avatar: string }>,
-      trackCount: Number(row.track_count || row.tracks_count || 0),
+        trackCount: Number(row.track_count || row.tracks_count || 0),
+        creatorId: String(row.creator_id || row.created_by || ""),
       pendingInviteCount: Number(row.pending_invite_count || 0),
       lastUpdated: row.updated_at ? "Recently" : "Just now",
     });

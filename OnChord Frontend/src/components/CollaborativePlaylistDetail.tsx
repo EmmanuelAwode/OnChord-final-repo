@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -21,10 +21,13 @@ import {
   Save,
   X,
   UserPlus,
-  Loader2
+  Loader2,
+  Camera
 } from "lucide-react";
 import { toast } from "sonner";
 import { searchAlbums } from "../lib/api/musicSearch";
+import { useProfile } from "../lib/useProfile";
+import { supabase } from "../lib/supabaseClient";
 
 interface Album {
   id: string;
@@ -58,6 +61,8 @@ interface CollaborativePlaylistDetailProps {
     title: string;
     description: string;
     cover: string;
+    creatorId?: string;
+    creatorName?: string;
     trackCount: number;
     contributors: Contributor[];
     lastUpdated: string;
@@ -99,6 +104,11 @@ export function CollaborativePlaylistDetail({
   const [showAddTrack, setShowAddTrack] = useState(false);
   // `initialMode` lets the parent open this screen directly in view or edit mode.
   const [isEditMode, setIsEditMode] = useState(initialMode === "edit");
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const { profile } = useProfile();
+  const currentUserId = profile?.id || "";
+  const creatorId = String(playlist?.creatorId || "");
+  const isCreator = !!currentUserId && !!creatorId && currentUserId === creatorId;
   
   // Editable fields
   const [editedTitle, setEditedTitle] = useState(safePlaylist.title);
@@ -124,6 +134,56 @@ export function CollaborativePlaylistDetail({
     setEditedMoods(safePlaylist.moods);
     setEditedContributors(safePlaylist.contributors);
   }, [safePlaylist.title, safePlaylist.description, safePlaylist.moods, safePlaylist.contributors, isEditMode]);
+
+  const handleCoverUpdate = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be less than 5MB");
+      return;
+    }
+
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image"));
+      reader.readAsDataURL(file);
+    }).catch(() => "");
+
+    if (!dataUrl) {
+      toast.error("Failed to load image");
+      return;
+    }
+
+    onUpdatePlaylist?.({ cover: dataUrl });
+
+    const coverAttempts = [
+      () => supabase.from("collaborative_playlists").update({ cover_image: dataUrl }).eq("id", safePlaylist.id),
+      () => supabase.from("playlists").update({ cover_image: dataUrl }).eq("id", safePlaylist.id),
+    ];
+
+    let coverSaved = false;
+    for (const attempt of coverAttempts) {
+      const { error } = await attempt();
+      if (!error) {
+        coverSaved = true;
+        break;
+      }
+    }
+
+    if (coverSaved) {
+      toast.success("Playlist picture updated");
+    } else {
+      toast.warning("Picture updated in the app, but could not be saved to the database.");
+    }
+  };
 
   // Debounce searches so typing in the add-track flow does not fire a request per keystroke.
   useEffect(() => {
@@ -199,6 +259,11 @@ export function CollaborativePlaylistDetail({
   };
 
   const handleAddContributor = (contributor: Contributor) => {
+    if (!isCreator) {
+      toast.error("Only the creator can add contributors");
+      return;
+    }
+
     if (!editedContributors.some(c => c.id === contributor.id)) {
       setEditedContributors(prev => [...prev, contributor]);
       setShowAddContributor(false);
@@ -206,6 +271,11 @@ export function CollaborativePlaylistDetail({
   };
 
   const handleRemoveContributor = (contributorId: string) => {
+    if (contributorId === creatorId) {
+      toast.error("The creator cannot be removed");
+      return;
+    }
+
     setEditedContributors(prev => prev.filter(c => c.id !== contributorId));
   };
 
@@ -315,11 +385,29 @@ export function CollaborativePlaylistDetail({
           </div>
 
           <div className="grid md:grid-cols-[96px_1fr] gap-5 items-start">
-            <img
-              src={safePlaylist.cover}
-              alt={safePlaylist.title}
-              className="w-24 h-24 md:w-24 md:h-24 object-cover rounded-lg border border-border shadow-sm"
-            />
+            <div className="relative w-24 h-24 md:w-24 md:h-24">
+              <img
+                src={safePlaylist.cover}
+                alt={safePlaylist.title}
+                className="w-24 h-24 md:w-24 md:h-24 object-cover rounded-lg border border-border shadow-sm"
+              />
+              <input
+                ref={coverInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleCoverUpdate}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="absolute -bottom-2 -right-2 bg-background/95 border-border h-8 px-2"
+                onClick={() => coverInputRef.current?.click()}
+              >
+                <Camera className="w-3.5 h-3.5 mr-1" />
+                Cover
+              </Button>
+            </div>
             <div className="space-y-3 min-w-0">
               <div>
                 <h3 className="text-2xl text-foreground mb-1 truncate">{safePlaylist.title}</h3>
@@ -339,8 +427,9 @@ export function CollaborativePlaylistDetail({
 
               <div className="flex flex-wrap gap-2">
                 {safePlaylist.contributors.map((contributor) => (
-                  <Badge key={contributor.id} variant="outline" className="border-border text-foreground">
+                  <Badge key={contributor.id} variant="outline" className={`border-border text-foreground ${contributor.id === creatorId ? "border-primary text-primary" : ""}`}>
                     {contributor.name}
+                    {contributor.id === creatorId && <span className="ml-2 text-[10px] uppercase tracking-wide">Creator</span>}
                   </Badge>
                 ))}
               </div>
@@ -414,17 +503,19 @@ export function CollaborativePlaylistDetail({
                         )}
                         <div>
                           <p className="text-sm text-foreground">{contributor.name}</p>
-                          <p className="text-xs text-muted-foreground">Contributor</p>
+                          <p className="text-xs text-muted-foreground">{contributor.id === creatorId ? "Creator" : "Contributor"}</p>
                         </div>
                       </div>
-                      <Button size="sm" variant="ghost" onClick={() => handleRemoveContributor(contributor.id)} className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive transition-all">
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                      {contributor.id !== creatorId && (
+                        <Button size="sm" variant="ghost" onClick={() => handleRemoveContributor(contributor.id)} className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive transition-all">
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </div>
 
-                {showAddContributor ? (
+                {showAddContributor && isCreator ? (
                   <div className="p-4 rounded-lg bg-primary/5 border border-primary/30">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-sm text-foreground">Add Contributor</h4>
@@ -450,11 +541,13 @@ export function CollaborativePlaylistDetail({
                       ))}
                     </div>
                   </div>
-                ) : (
+                ) : isCreator ? (
                   <Button variant="outline" size="sm" onClick={() => setShowAddContributor(true)} className="w-full border-dashed border-primary/30 hover:border-primary hover:bg-primary/5">
                     <UserPlus className="w-4 h-4 mr-2" />
                     Add Contributor
                   </Button>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">Only the creator can add contributors.</p>
                 )}
               </div>
             </div>

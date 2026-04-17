@@ -92,6 +92,8 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         description: string;
         cover: string;
         updatedAtRaw: string | null;
+        creatorId: string | null;
+        moods: string[];
       };
 
       const basePlaylists = new Map<string, BasePlaylist>();
@@ -115,6 +117,8 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
           description: fallback?.description || "A collaborative playlist",
           cover: fallback?.cover || `https://api.dicebear.com/7.x/shapes/svg?seed=${playlistId}`,
           updatedAtRaw: fallback?.updatedAtRaw || null,
+          creatorId: fallback?.creatorId || null,
+          moods: Array.isArray((fallback as any)?.moods) ? (fallback as any).moods : [],
         };
         basePlaylists.set(playlistId, created);
         return created;
@@ -146,6 +150,8 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             description: row.description || "A collaborative playlist",
             cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${id}`,
             updatedAtRaw: row.updated_at || row.created_at || null,
+            creatorId: row.creator_id || row.created_by || null,
+            moods: Array.isArray(row.moods) ? row.moods : [],
           });
 
           if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
@@ -184,6 +190,8 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             description: row.description || "A collaborative playlist",
             cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${id}`,
             updatedAtRaw: row.updated_at || row.created_at || null,
+            creatorId: row.creator_id || row.created_by || null,
+            moods: Array.isArray(row.moods) ? row.moods : [],
           });
 
           if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
@@ -295,6 +303,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             title: base.title,
             description: base.description,
             cover: base.cover,
+            creatorId: base.creatorId,
             trackCount: tracksByPlaylist.get(id) || 0,
             pendingInviteCount: pendingByPlaylist.get(id) || 0,
             contributors:
@@ -308,7 +317,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
                     },
                   ],
             lastUpdated: formatLastUpdated(base.updatedAtRaw),
-            moods: ["Collaborative", "Fresh", "New"],
+            moods: Array.isArray(base.moods) && base.moods.length > 0 ? base.moods : ["Collaborative", "Fresh", "New"],
             updatedAtRaw: base.updatedAtRaw || new Date(0).toISOString(),
           };
         })
@@ -676,6 +685,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
       title: playlistTitle,
       description: playlistDescription || "A new collaborative playlist",
       cover: `https://api.dicebear.com/7.x/shapes/svg?seed=${Date.now()}`,
+        creatorId: profile?.id || currentUserId,
       trackCount: 0,
       pendingInviteCount: selectedCollaborators.length,
       contributors: [
@@ -686,7 +696,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         },
       ],
       lastUpdated: "Just now",
-      moods: ["New", "Fresh", "Collaborative"],
+        moods: ["New", "Fresh", "Collaborative"],
     };
 
     // Add to the beginning of the playlists array
