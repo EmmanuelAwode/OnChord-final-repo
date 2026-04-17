@@ -771,6 +771,7 @@ const handleSubmitReview = async (reviewData: {
             onLogout={handleLogout}
             onEditReview={setEditingReview}
             collaborativePlaylists={collaborativePlaylists}
+            onCollaborativePlaylistsChange={setCollaborativePlaylists}
           />
         );
       case "your-space-lists":
@@ -786,6 +787,7 @@ const handleSubmitReview = async (reviewData: {
             onLogout={handleLogout}
             onEditReview={setEditingReview}
             collaborativePlaylists={collaborativePlaylists}
+            onCollaborativePlaylistsChange={setCollaborativePlaylists}
           />
         );
       case "your-space-followers":
@@ -801,6 +803,7 @@ const handleSubmitReview = async (reviewData: {
             onLogout={handleLogout}
             onEditReview={setEditingReview}
             collaborativePlaylists={collaborativePlaylists}
+            onCollaborativePlaylistsChange={setCollaborativePlaylists}
           />
         );
       case "lists":
