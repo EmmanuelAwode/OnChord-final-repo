@@ -34,6 +34,7 @@ interface YourSpacePageProps {
   onLogout?: () => void;
   onEditReview?: (review: any) => void;
   collaborativePlaylists?: any[];
+  onCollaborativePlaylistsChange?: React.Dispatch<React.SetStateAction<any[]>>;
 }
 
 export function YourSpacePage({ 
@@ -46,7 +47,8 @@ export function YourSpacePage({
   initialTab = "profile",
   onLogout,
   onEditReview,
-  collaborativePlaylists: collaborativePlaylistsProp = []
+  collaborativePlaylists: collaborativePlaylistsProp = [],
+  onCollaborativePlaylistsChange,
 }: YourSpacePageProps) {
   const [activeTab, setActiveTab] = useState(initialTab);
   const [commentsModalOpen, setCommentsModalOpen] = useState(false);
@@ -130,6 +132,221 @@ export function YourSpacePage({
     lastUpdated: playlist?.lastUpdated || playlist?.updated_at || "Just now",
   });
   const collaborativePlaylists = (collaborativePlaylistsProp.length > 0 ? collaborativePlaylistsProp : loadedCollaborativePlaylists).map(normalizeCollaborativePlaylist);
+
+  const updateSharedCollaborativePlaylist = (playlistId: string, updater: (playlist: any) => any) => {
+    const applyUpdate = (items: any[]) => items.map((playlist) => (playlist.id === playlistId ? updater(playlist) : playlist));
+
+    if (collaborativePlaylistsProp.length > 0 && onCollaborativePlaylistsChange) {
+      onCollaborativePlaylistsChange((prev) => applyUpdate(prev));
+      return;
+    }
+
+    setLoadedCollaborativePlaylists((prev) => applyUpdate(prev));
+  };
+
+  const persistCollaborativePlaylistChanges = async (
+    playlistId: string,
+    updates: {
+      title?: string;
+      description?: string;
+      cover?: string;
+      contributors?: Array<{ id: string; name: string; avatar?: string }>;
+    }
+  ) => {
+    if (!profile?.id) {
+      throw new Error("Not signed in");
+    }
+
+    const now = new Date().toISOString();
+    const contributorIds = Array.from(
+      new Set([
+        profile.id,
+        ...(updates.contributors || []).map((contributor) => contributor.id).filter(Boolean),
+      ])
+    );
+
+    const modernPayload = {
+      name: updates.title,
+      description: updates.description,
+      cover_image: updates.cover,
+      updated_at: now,
+    };
+
+    const legacyPayload = {
+      name: updates.title,
+      description: updates.description,
+      cover_image: updates.cover,
+      collaborators: contributorIds,
+      updated_at: now,
+    };
+
+    const updateAttempts = [
+      () => supabase.from("collaborative_playlists").update(modernPayload).eq("id", playlistId),
+      () => supabase.from("playlists").update(legacyPayload).eq("id", playlistId),
+    ];
+
+    let lastError: any = null;
+
+    for (const attempt of updateAttempts) {
+      const { error } = await attempt();
+      if (!error) {
+        lastError = null;
+        continue;
+      }
+
+      lastError = error;
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    if (updates.contributors) {
+      const currentPlaylist = collaborativePlaylists.find((playlist) => playlist.id === playlistId);
+      const previousContributorIds = Array.isArray(currentPlaylist?.contributors)
+        ? currentPlaylist.contributors.map((contributor: any) => String(contributor.id)).filter(Boolean)
+        : [];
+
+      const contributorRows = contributorIds.map((userId) => ({
+        playlist_id: playlistId,
+        user_id: userId,
+        role: userId === profile.id ? "owner" : "contributor",
+      }));
+
+      const { error: collaboratorUpsertError } = await supabase
+        .from("playlist_collaborators")
+        .upsert(contributorRows, { onConflict: "playlist_id,user_id" });
+
+      if (collaboratorUpsertError) {
+        console.warn("Failed to persist playlist_collaborators:", collaboratorUpsertError);
+      }
+
+      const { error: contributorUpsertError } = await supabase
+        .from("playlist_contributors")
+        .upsert(
+          contributorIds.map((userId) => ({ playlist_id: playlistId, user_id: userId })),
+          { onConflict: "playlist_id,user_id" }
+        );
+
+      if (contributorUpsertError) {
+        console.warn("Failed to persist playlist_contributors:", contributorUpsertError);
+      }
+
+      const removedContributorIds = previousContributorIds.filter((id) => !contributorIds.includes(id));
+
+      for (const userId of removedContributorIds) {
+        await supabase.from("playlist_collaborators").delete().eq("playlist_id", playlistId).eq("user_id", userId);
+        await supabase.from("playlist_contributors").delete().eq("playlist_id", playlistId).eq("user_id", userId);
+      }
+    }
+  };
+
+  const persistCollaborativeTrackChange = async (
+    playlistId: string,
+    track: { id: string; title: string; artist: string; cover?: string; duration?: string },
+    position: number
+  ) => {
+    if (!profile?.id) {
+      throw new Error("Not signed in");
+    }
+
+    const durationMs = track.duration ? Math.max(0, Math.round(Number.parseFloat(track.duration) * 60_000)) : null;
+    const baseRow = {
+      playlist_id: playlistId,
+      track_id: track.id,
+      track_title: track.title,
+      track_artist: track.artist,
+      album_cover: track.cover || null,
+      added_by: profile.id,
+      added_by_name: profile.display_name || profile.username || "You",
+      added_by_avatar: profile.avatar_url || null,
+      position,
+      duration_ms: durationMs,
+      preview_url: null,
+      spotify_url: null,
+      apple_music_url: null,
+    };
+
+    const richRow = {
+      ...baseRow,
+      album_name: track.title,
+    };
+
+    const insertAttempts: Array<() => Promise<{ error: any }>> = [
+      () => supabase.from("playlist_tracks").insert(richRow).select("id, added_at").single(),
+      () => supabase.from("playlist_tracks").insert(baseRow).select("id, added_at").single(),
+    ];
+
+    let lastError: any = null;
+
+    for (const attempt of insertAttempts) {
+      const result = await attempt();
+      if (!result.error) {
+        lastError = null;
+        break;
+      }
+
+      lastError = result.error;
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+  };
+
+  const removeCollaborativeTrackFromDb = async (playlistId: string, trackId: string) => {
+    const { error } = await supabase
+      .from("playlist_tracks")
+      .delete()
+      .eq("playlist_id", playlistId)
+      .eq("track_id", trackId);
+
+    if (error) {
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedPlaylistId) return;
+
+    let active = true;
+
+    async function loadSelectedPlaylistTracks() {
+      const { data, error } = await supabase
+        .from("playlist_tracks")
+        .select("id, track_id, track_title, track_artist, album_cover, added_by, added_by_name, added_by_avatar, added_at, position, duration_ms")
+        .eq("playlist_id", selectedPlaylistId)
+        .order("position", { ascending: true })
+        .order("added_at", { ascending: true });
+
+      if (error) {
+        console.error("Failed to load collaborative playlist tracks in Your Space:", error);
+        return;
+      }
+
+      if (!active) return;
+
+      setPlaylistTracksState((prev) => ({
+        ...prev,
+        [selectedPlaylistId]: (data || []).map((row: any) => ({
+          id: String(row.track_id || row.id || ""),
+          title: row.track_title || "Unknown Track",
+          artist: row.track_artist || "Unknown Artist",
+          album: row.album_name || row.track_title || undefined,
+          cover: row.album_cover || undefined,
+          addedBy: row.added_by_name || "Collaborator",
+          timestamp: row.added_at ? "Just now" : "Just now",
+          duration: row.duration_ms ? `${Math.floor(row.duration_ms / 60000)}:${String(Math.floor((row.duration_ms % 60000) / 1000)).padStart(2, "0")}` : undefined,
+        })),
+      }));
+    }
+
+    loadSelectedPlaylistTracks();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedPlaylistId]);
 
   // Update active tab when initialTab prop changes
   useEffect(() => {
@@ -985,17 +1202,86 @@ export function YourSpacePage({
                   setSelectedPlaylistMode("view");
               }}
                 onOpenTrack={onOpenAlbum}
-              onAddTrack={(track) => {
-                setPlaylistTracksState(prev => ({
+              onAddTrack={async (track) => {
+                if (!selectedPlaylistId) return;
+
+                setPlaylistTracksState((prev) => ({
                   ...prev,
                   [selectedPlaylistId]: [track, ...(prev[selectedPlaylistId] || [])],
                 }));
+
+                updateSharedCollaborativePlaylist(selectedPlaylistId, (playlist) => ({
+                  ...playlist,
+                  trackCount: Number(playlist.trackCount || 0) + 1,
+                  lastUpdated: "Just now",
+                }));
+
+                try {
+                  const nextPosition = (playlistTracksState[selectedPlaylistId] || []).length;
+                  await persistCollaborativeTrackChange(selectedPlaylistId, track, nextPosition);
+                } catch (error) {
+                  console.error("Failed to persist collaborative track add:", error);
+                  toast.error("Could not save this track to the playlist");
+                  setPlaylistTracksState((prev) => ({
+                    ...prev,
+                    [selectedPlaylistId]: (prev[selectedPlaylistId] || []).filter((item) => item.id !== track.id),
+                  }));
+                  updateSharedCollaborativePlaylist(selectedPlaylistId, (playlist) => ({
+                    ...playlist,
+                    trackCount: Math.max(0, Number(playlist.trackCount || 1) - 1),
+                    lastUpdated: "Just now",
+                  }));
+                }
               }}
-              onRemoveTrack={(trackId) => {
-                setPlaylistTracksState(prev => ({
+              onRemoveTrack={async (trackId) => {
+                if (!selectedPlaylistId) return;
+
+                const removedTrack = (playlistTracksState[selectedPlaylistId] || []).find((track) => track.id === trackId);
+
+                setPlaylistTracksState((prev) => ({
                   ...prev,
                   [selectedPlaylistId]: (prev[selectedPlaylistId] || []).filter(t => t.id !== trackId),
                 }));
+
+                updateSharedCollaborativePlaylist(selectedPlaylistId, (playlist) => ({
+                  ...playlist,
+                  trackCount: Math.max(0, Number(playlist.trackCount || 0) - 1),
+                  lastUpdated: "Just now",
+                }));
+
+                try {
+                  await removeCollaborativeTrackFromDb(selectedPlaylistId, trackId);
+                } catch (error) {
+                  console.error("Failed to persist collaborative track removal:", error);
+                  toast.error("Could not remove this track from the playlist");
+                  setPlaylistTracksState((prev) => ({
+                    ...prev,
+                    [selectedPlaylistId]: removedTrack
+                      ? [removedTrack, ...(prev[selectedPlaylistId] || [])]
+                      : [...(prev[selectedPlaylistId] || [])],
+                  }));
+                  updateSharedCollaborativePlaylist(selectedPlaylistId, (playlist) => ({
+                    ...playlist,
+                    trackCount: Number(playlist.trackCount || 0) + 1,
+                    lastUpdated: "Just now",
+                  }));
+                }
+              }}
+              onUpdatePlaylist={async (updates) => {
+                if (!selectedPlaylistId) return;
+
+                updateSharedCollaborativePlaylist(selectedPlaylistId, (playlist) => ({
+                  ...playlist,
+                  ...updates,
+                  lastUpdated: "Just now",
+                }));
+
+                try {
+                  await persistCollaborativePlaylistChanges(selectedPlaylistId, updates);
+                } catch (error) {
+                  console.error("Failed to persist collaborative playlist updates:", error);
+                  toast.error("Could not save playlist changes");
+                }
               }}
             />
           ) : (

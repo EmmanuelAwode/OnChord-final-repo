@@ -110,6 +110,21 @@ export function CollaborativePlaylistDetail({
   const [searchAlbumResults, setSearchAlbumResults] = useState<Album[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
+  useEffect(() => {
+    setTracks(initialTracks || []);
+  }, [initialTracks]);
+
+  useEffect(() => {
+    if (isEditMode) {
+      return;
+    }
+
+    setEditedTitle(safePlaylist.title);
+    setEditedDescription(safePlaylist.description);
+    setEditedMoods(safePlaylist.moods);
+    setEditedContributors(safePlaylist.contributors);
+  }, [safePlaylist.title, safePlaylist.description, safePlaylist.moods, safePlaylist.contributors, isEditMode]);
+
   // Debounce searches so typing in the add-track flow does not fire a request per keystroke.
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -159,7 +174,7 @@ export function CollaborativePlaylistDetail({
       duration: "3:45", // Mock duration
     };
 
-    setTracks(prev => [newTrack, ...prev]);
+    setTracks((prev) => [newTrack, ...prev]);
     onAddTrack?.(newTrack);
     toast.success(`Added "${album.title}" to playlist`);
     setShowAddTrack(false);
@@ -201,7 +216,11 @@ export function CollaborativePlaylistDetail({
       moods: editedMoods,
       contributors: editedContributors,
     });
+    setIsEditMode(false);
     toast.success("Playlist updated successfully!");
+    window.setTimeout(() => {
+      document.getElementById("collab-view-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   };
 
   const handleCancelEdit = () => {
