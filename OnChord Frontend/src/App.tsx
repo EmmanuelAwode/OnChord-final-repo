@@ -147,7 +147,7 @@ export default function App() {
     return msg.includes("timed out") || msg.includes("timeout") || msg.includes("aborted");
   };
 
-  const getSessionWithRetry = async () => {
+  const getSessionWithRetry = async (): Promise<{ data: any; error: any }> => {
     try {
       return await withTimeout(
         supabase.auth.getSession(),
@@ -239,8 +239,7 @@ export default function App() {
         .from("profiles")
         .select("username, accent_color, email, onboarding_completed")
         .eq("id", u.id)
-        .maybeSingle()
-        .abortSignal();
+        .maybeSingle();
 
       if (error) {
         console.error("background profile fetch error:", error);
@@ -771,6 +770,7 @@ const handleSubmitReview = async (reviewData: {
             onAccentColorChange={setAccentColor}
             onLogout={handleLogout}
             onEditReview={setEditingReview}
+            collaborativePlaylists={collaborativePlaylists}
           />
         );
       case "your-space-lists":
@@ -785,6 +785,7 @@ const handleSubmitReview = async (reviewData: {
             initialTab="lists"
             onLogout={handleLogout}
             onEditReview={setEditingReview}
+            collaborativePlaylists={collaborativePlaylists}
           />
         );
       case "your-space-followers":
@@ -799,6 +800,7 @@ const handleSubmitReview = async (reviewData: {
             initialTab="followers"
             onLogout={handleLogout}
             onEditReview={setEditingReview}
+            collaborativePlaylists={collaborativePlaylists}
           />
         );
       case "lists":

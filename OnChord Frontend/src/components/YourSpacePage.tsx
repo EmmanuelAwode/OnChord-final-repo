@@ -33,6 +33,7 @@ interface YourSpacePageProps {
   initialTab?: string;
   onLogout?: () => void;
   onEditReview?: (review: any) => void;
+  collaborativePlaylists?: any[];
 }
 
 export function YourSpacePage({ 
@@ -44,7 +45,8 @@ export function YourSpacePage({
   onAccentColorChange,
   initialTab = "profile",
   onLogout,
-  onEditReview
+  onEditReview,
+  collaborativePlaylists: collaborativePlaylistsProp = []
 }: YourSpacePageProps) {
   const [activeTab, setActiveTab] = useState(initialTab);
   const [commentsModalOpen, setCommentsModalOpen] = useState(false);
@@ -70,10 +72,6 @@ export function YourSpacePage({
   
   // Compute userListsArray from metadata for stats display
   const userListsArray = useMemo(() => Object.values(userListsMetadata || {}), [userListsMetadata]);
-  
-  // Collaborative playlists state (empty until real collab playlist system is implemented)
-  const [collaborativePlaylists, setCollaborativePlaylists] = useState<any[]>([]);
-  const [playlistTracks, setPlaylistTracks] = useState<any[]>([]);
   
   // Fetch top artists from Spotify
   const { artists: topArtists, loading: artistsLoading } = useTopArtists("medium_term", 10);
@@ -114,7 +112,24 @@ export function YourSpacePage({
 
   // Selected playlist detail view state
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
+  const [selectedPlaylistMode, setSelectedPlaylistMode] = useState<"view" | "edit">("view");
   const [playlistTracksState, setPlaylistTracksState] = useState<Record<string, any[]>>({});
+  const [loadedCollaborativePlaylists, setLoadedCollaborativePlaylists] = useState<any[]>([]);
+
+  // Keep the collab tab functional even when the parent app has not supplied playlist data yet.
+  // Shared collaborative playlists state comes from App when available; otherwise use a local fallback load.
+  const normalizeCollaborativePlaylist = (playlist: any) => ({
+    ...playlist,
+    id: String(playlist?.id || ""),
+    title: playlist?.title || playlist?.name || "Collaborative Playlist",
+    description: playlist?.description || "A collaborative playlist",
+    cover: playlist?.cover || playlist?.cover_url || playlist?.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${String(playlist?.id || Date.now())}`,
+    moods: Array.isArray(playlist?.moods) ? playlist.moods : [],
+    contributors: Array.isArray(playlist?.contributors) ? playlist.contributors : [],
+    trackCount: Number(playlist?.trackCount || playlist?.track_count || playlist?.tracks_count || 0),
+    lastUpdated: playlist?.lastUpdated || playlist?.updated_at || "Just now",
+  });
+  const collaborativePlaylists = (collaborativePlaylistsProp.length > 0 ? collaborativePlaylistsProp : loadedCollaborativePlaylists).map(normalizeCollaborativePlaylist);
 
   // Update active tab when initialTab prop changes
   useEffect(() => {
@@ -180,6 +195,147 @@ export function YourSpacePage({
     }
   }, [profile?.id]);
 
+  useEffect(() => {
+    if (collaborativePlaylistsProp.length > 0 || !profile?.id) {
+      return;
+    }
+
+    let active = true;
+
+    const buildBasePlaylist = (row: any) => ({
+      id: String(row.id || ""),
+      title: row.title || row.name || "Collaborative Playlist",
+      description: row.description || "A collaborative playlist",
+      cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${String(row.id || Date.now())}`,
+      moods: Array.isArray(row.moods) ? row.moods : [],
+      contributors: [] as Array<{ id: string; name: string; avatar: string }>,
+      trackCount: Number(row.track_count || row.tracks_count || 0),
+      pendingInviteCount: Number(row.pending_invite_count || 0),
+      lastUpdated: row.updated_at ? "Recently" : "Just now",
+    });
+
+    async function loadCollaborativePlaylists() {
+      try {
+        const [modernPlaylistsRes, modernCollaboratorsRes, legacyPlaylistsRes, legacyContributorsRes] = await Promise.all([
+          supabase.from("collaborative_playlists").select("*").order("updated_at", { ascending: false }),
+          supabase.from("playlist_collaborators").select("playlist_id,user_id"),
+          supabase.from("playlists").select("*").order("updated_at", { ascending: false }),
+          supabase.from("playlist_contributors").select("playlist_id,user_id"),
+        ]);
+
+        const basePlaylists = new Map<string, any>();
+        const contributorIdsByPlaylist = new Map<string, Set<string>>();
+
+        const ensureContributorSet = (playlistId: string) => {
+          const existing = contributorIdsByPlaylist.get(playlistId);
+          if (existing) return existing;
+          const created = new Set<string>();
+          contributorIdsByPlaylist.set(playlistId, created);
+          return created;
+        };
+
+        const ensureBasePlaylist = (playlistId: string, fallback?: Partial<any>) => {
+          const existing = basePlaylists.get(playlistId);
+          if (existing) return existing;
+          const created = {
+            id: playlistId,
+            title: fallback?.title || "Collaborative Playlist",
+            description: fallback?.description || "A collaborative playlist",
+            cover: fallback?.cover || `https://api.dicebear.com/7.x/shapes/svg?seed=${playlistId}`,
+            moods: [],
+            contributors: [] as Array<{ id: string; name: string; avatar: string }>,
+            trackCount: Number(fallback?.trackCount || 0),
+            pendingInviteCount: 0,
+            lastUpdated: fallback?.lastUpdated || "Just now",
+          };
+          basePlaylists.set(playlistId, created);
+          return created;
+        };
+
+        if (!modernPlaylistsRes.error && modernPlaylistsRes.data) {
+          for (const row of modernPlaylistsRes.data as any[]) {
+            const id = String(row.id || "");
+            if (!id) continue;
+            ensureBasePlaylist(id, buildBasePlaylist(row));
+            if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
+            if (row.created_by) ensureContributorSet(id).add(String(row.created_by));
+          }
+        }
+
+        if (!modernCollaboratorsRes.error && modernCollaboratorsRes.data) {
+          for (const row of modernCollaboratorsRes.data as any[]) {
+            const playlistId = String(row.playlist_id || "");
+            const userId = String(row.user_id || "");
+            if (!playlistId || !userId) continue;
+            ensureBasePlaylist(playlistId);
+            ensureContributorSet(playlistId).add(userId);
+          }
+        }
+
+        if (!legacyPlaylistsRes.error && legacyPlaylistsRes.data) {
+          for (const row of legacyPlaylistsRes.data as any[]) {
+            const id = String(row.id || "");
+            if (!id) continue;
+            ensureBasePlaylist(id, buildBasePlaylist(row));
+            if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
+            if (Array.isArray(row.collaborators)) {
+              for (const collaboratorId of row.collaborators) {
+                if (collaboratorId) ensureContributorSet(id).add(String(collaboratorId));
+              }
+            }
+          }
+        }
+
+        if (!legacyContributorsRes.error && legacyContributorsRes.data) {
+          for (const row of legacyContributorsRes.data as any[]) {
+            const playlistId = String(row.playlist_id || "");
+            const userId = String(row.user_id || "");
+            if (!playlistId || !userId) continue;
+            ensureBasePlaylist(playlistId);
+            ensureContributorSet(playlistId).add(userId);
+          }
+        }
+
+        const playlistIds = Array.from(basePlaylists.keys()).filter((id) => {
+          const contributors = contributorIdsByPlaylist.get(id);
+          return contributors?.has(profile.id) || false;
+        });
+
+        const contributorIds = Array.from(new Set(playlistIds.flatMap((id) => Array.from(contributorIdsByPlaylist.get(id) || []))));
+        const contributorProfiles = contributorIds.length > 0 ? await getProfiles(contributorIds) : [];
+        const profileMap = new Map(contributorProfiles.map((p) => [p.id, p]));
+
+        const nextPlaylists = playlistIds.map((id) => {
+          const playlist = basePlaylists.get(id);
+          const contributorSet = contributorIdsByPlaylist.get(id) || new Set<string>();
+          return {
+            ...playlist,
+            contributors: Array.from(contributorSet).map((userId) => {
+              const contributorProfile = profileMap.get(userId);
+              return {
+                id: userId,
+                name: contributorProfile?.display_name || contributorProfile?.username || "Collaborator",
+                avatar: contributorProfile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
+              };
+            }),
+          };
+        });
+
+        if (active) {
+          setLoadedCollaborativePlaylists(nextPlaylists);
+        }
+      } catch (error) {
+        console.error("Failed to load collaborative playlists in Your Space:", error);
+      }
+    }
+
+    loadCollaborativePlaylists();
+
+    return () => {
+      active = false;
+    };
+  }, [collaborativePlaylistsProp.length, profile?.id]);
+
   const handleFollowToggle = (userId: string, userName: string) => {
     const wasFollowing = isFollowing(userId);
     toggleFollow(userId);
@@ -208,6 +364,7 @@ export function YourSpacePage({
     onNavigate?.("playlist");
   };
 
+  // Grid cards choose the initial mode; the detail screen then owns the view/edit toggle.
   const handleListClick = (listId: string) => {
     setSelectedListDetail(listId);
     setActiveTab("lists");
@@ -822,7 +979,12 @@ export function YourSpacePage({
             <CollaborativePlaylistDetail
               playlist={collaborativePlaylists.find(p => p.id === selectedPlaylistId)!}
               tracks={playlistTracksState[selectedPlaylistId] || []}
-              onBack={() => setSelectedPlaylistId(null)}
+                initialMode={selectedPlaylistMode}
+              onBack={() => {
+                setSelectedPlaylistId(null);
+                  setSelectedPlaylistMode("view");
+              }}
+                onOpenTrack={onOpenAlbum}
               onAddTrack={(track) => {
                 setPlaylistTracksState(prev => ({
                   ...prev,
@@ -875,7 +1037,10 @@ export function YourSpacePage({
                   >
                     <div 
                       className="flex gap-4 p-5 cursor-pointer" 
-                      onClick={() => setSelectedPlaylistId(playlist.id)}
+                      onClick={() => {
+                        setSelectedPlaylistMode("view");
+                        setSelectedPlaylistId(playlist.id);
+                      }}
                     >
                       {/* Playlist Cover */}
                       <div className="relative flex-shrink-0">
@@ -961,6 +1126,7 @@ export function YourSpacePage({
                         className="flex-1 border-border hover:border-primary hover:text-primary"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setSelectedPlaylistMode("edit");
                           setSelectedPlaylistId(playlist.id);
                         }}
                       >
@@ -972,6 +1138,7 @@ export function YourSpacePage({
                         className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setSelectedPlaylistMode("view");
                           setSelectedPlaylistId(playlist.id);
                         }}
                       >

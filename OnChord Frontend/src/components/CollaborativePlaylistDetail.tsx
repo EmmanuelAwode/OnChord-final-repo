@@ -65,6 +65,8 @@ interface CollaborativePlaylistDetailProps {
   };
   tracks: Track[];
   onBack: () => void;
+  initialMode?: "view" | "edit";
+  onOpenTrack?: (trackData: any) => void;
   onAddTrack?: (track: Track) => void;
   onRemoveTrack?: (trackId: string) => void;
   onUpdatePlaylist?: (updates: Partial<CollaborativePlaylistDetailProps['playlist']>) => void;
@@ -74,26 +76,41 @@ export function CollaborativePlaylistDetail({
   playlist,
   tracks: initialTracks,
   onBack,
+  initialMode = "view",
+  onOpenTrack,
   onAddTrack,
   onRemoveTrack,
   onUpdatePlaylist,
 }: CollaborativePlaylistDetailProps) {
-  const [tracks, setTracks] = useState<Track[]>(initialTracks);
+  // Normalize playlist data so missing legacy fields do not break the detail view.
+  const safePlaylist = {
+    id: playlist?.id || "",
+    title: playlist?.title || "Collaborative Playlist",
+    description: playlist?.description || "A collaborative playlist",
+    cover: playlist?.cover || `https://api.dicebear.com/7.x/shapes/svg?seed=${String(playlist?.id || Date.now())}`,
+    trackCount: Number(playlist?.trackCount || 0),
+    contributors: Array.isArray(playlist?.contributors) ? playlist.contributors : [],
+    lastUpdated: playlist?.lastUpdated || "Just now",
+    moods: Array.isArray(playlist?.moods) ? playlist.moods : [],
+  };
+
+  const [tracks, setTracks] = useState<Track[]>(initialTracks || []);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddTrack, setShowAddTrack] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false);
+  // `initialMode` lets the parent open this screen directly in view or edit mode.
+  const [isEditMode, setIsEditMode] = useState(initialMode === "edit");
   
   // Editable fields
-  const [editedTitle, setEditedTitle] = useState(playlist.title);
-  const [editedDescription, setEditedDescription] = useState(playlist.description);
-  const [editedMoods, setEditedMoods] = useState<string[]>(playlist.moods);
+  const [editedTitle, setEditedTitle] = useState(safePlaylist.title);
+  const [editedDescription, setEditedDescription] = useState(safePlaylist.description);
+  const [editedMoods, setEditedMoods] = useState<string[]>(safePlaylist.moods);
   const [newMood, setNewMood] = useState("");
-  const [editedContributors, setEditedContributors] = useState<Contributor[]>(playlist.contributors);
+  const [editedContributors, setEditedContributors] = useState<Contributor[]>(safePlaylist.contributors);
   const [showAddContributor, setShowAddContributor] = useState(false);
   const [searchAlbumResults, setSearchAlbumResults] = useState<Album[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Debounced album search
+  // Debounce searches so typing in the add-track flow does not fire a request per keystroke.
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchAlbumResults([]);
@@ -188,11 +205,25 @@ export function CollaborativePlaylistDetail({
   };
 
   const handleCancelEdit = () => {
-    setEditedTitle(playlist.title);
-    setEditedDescription(playlist.description);
-    setEditedMoods(playlist.moods);
-    setEditedContributors(playlist.contributors);
+    setEditedTitle(safePlaylist.title);
+    setEditedDescription(safePlaylist.description);
+    setEditedMoods(safePlaylist.moods);
+    setEditedContributors(safePlaylist.contributors);
+    setIsEditMode(false);
   };
+
+  const handleSwitchMode = (mode: "view" | "edit") => {
+    setIsEditMode(mode === "edit");
+    window.setTimeout(() => {
+      const target = mode === "edit" ? document.getElementById("collab-edit-section") : document.getElementById("collab-view-section");
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  };
+
+  // Keep the local mode in sync when the parent reopens the detail view in a different state.
+  useEffect(() => {
+    setIsEditMode(initialMode === "edit");
+  }, [initialMode]);
 
   // Placeholder contributors for adding - in a real app would fetch from following list
   const mockAvailableContributors: Contributor[] = [];
@@ -216,211 +247,201 @@ export function CollaborativePlaylistDetail({
         
         <div className="flex items-center gap-2">
           <Button
-            variant="outline"
+            variant={isEditMode ? "outline" : "default"}
             size="sm"
-            onClick={handleCancelEdit}
-            className="border-border hover:border-destructive hover:text-destructive"
+            onClick={() => handleSwitchMode("view")}
+            className={!isEditMode ? "bg-primary hover:bg-primary/90 text-primary-foreground" : "border-border hover:border-primary hover:text-primary"}
           >
-            <X className="w-4 h-4 mr-2" />
-            Reset Changes
+            View Playlist
           </Button>
           <Button
+            variant={isEditMode ? "default" : "outline"}
             size="sm"
-            onClick={handleSaveAllChanges}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+            onClick={() => handleSwitchMode("edit")}
+            className={isEditMode ? "bg-primary hover:bg-primary/90 text-primary-foreground" : "border-border hover:border-primary hover:text-primary"}
           >
-            <Save className="w-4 h-4 mr-2" />
-            Save All Changes
+            <Edit className="w-4 h-4 mr-2" />
+            Edit Playlist
           </Button>
+          {isEditMode && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancelEdit}
+                className="border-border hover:border-destructive hover:text-destructive"
+              >
+                <X className="w-4 h-4 mr-2" />
+                Reset Changes
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveAllChanges}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                Save All Changes
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Manage Playlist Section */}
-      <Card className="p-6 bg-card border-primary/30">
-        <div className="flex items-center gap-2 mb-6">
-          <Edit className="w-5 h-5 text-primary" />
-          <h2 className="text-xl text-foreground">Manage Playlist</h2>
-        </div>
-
-        <div className="space-y-6">
-          {/* Edit Title */}
-          <div>
-            <label className="text-sm text-foreground mb-2 block">Playlist Title</label>
-            <Input
-              value={editedTitle}
-              onChange={(e) => setEditedTitle(e.target.value)}
-              className="bg-background border-border text-foreground"
-              placeholder="Enter playlist title..."
-            />
+      {/* Playlist Info / Edit Section */}
+      {!isEditMode ? (
+        <Card id="collab-view-section" className="p-6 bg-card border-border">
+          <div className="flex items-center gap-2 mb-6">
+            <Users className="w-5 h-5 text-primary" />
+            <h2 className="text-xl text-foreground">View Playlist</h2>
           </div>
 
-          {/* Edit Description */}
-          <div>
-            <label className="text-sm text-foreground mb-2 block">Description</label>
-            <Textarea
-              value={editedDescription}
-              onChange={(e) => setEditedDescription(e.target.value)}
-              className="bg-background border-border text-foreground min-h-[80px]"
-              placeholder="Describe your playlist..."
+          <div className="grid md:grid-cols-[96px_1fr] gap-5 items-start">
+            <img
+              src={safePlaylist.cover}
+              alt={safePlaylist.title}
+              className="w-24 h-24 md:w-24 md:h-24 object-cover rounded-lg border border-border shadow-sm"
             />
-          </div>
+            <div className="space-y-3 min-w-0">
+              <div>
+                <h3 className="text-2xl text-foreground mb-1 truncate">{safePlaylist.title}</h3>
+                <p className="text-muted-foreground line-clamp-2">{safePlaylist.description}</p>
+              </div>
 
-          {/* Edit Moods/Tags */}
-          <div>
-            <label className="text-sm text-foreground mb-2 block">Moods & Tags</label>
-            <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
-                {editedMoods.map((mood) => (
-                  <Badge
-                    key={mood}
-                    variant="outline"
-                    className="border-secondary/50 text-secondary pr-1 group hover:border-destructive/50 transition-colors"
-                  >
-                    {mood}
-                    <button
-                      onClick={() => handleRemoveMood(mood)}
-                      className="ml-1.5 hover:text-destructive transition-colors"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                {safePlaylist.moods.map((mood) => (
+                  <Badge key={mood} variant="outline" className="border-secondary/50 text-secondary">{mood}</Badge>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
+                <span>{tracks.length} tracks</span>
+                <span>{safePlaylist.contributors.length} contributors</span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {safePlaylist.contributors.map((contributor) => (
+                  <Badge key={contributor.id} variant="outline" className="border-border text-foreground">
+                    {contributor.name}
                   </Badge>
                 ))}
               </div>
-              
-              <div className="flex gap-2">
-                <Input
-                  value={newMood}
-                  onChange={(e) => setNewMood(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleAddMood()}
-                  placeholder="Add a mood or tag..."
-                  className="flex-1 bg-background border-border text-foreground"
-                />
-                <Button
-                  size="sm"
-                  onClick={handleAddMood}
-                  className="bg-secondary hover:bg-secondary/90 text-white"
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add
-                </Button>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <span className="text-xs text-muted-foreground">Suggestions:</span>
-                {availableMoods.filter(m => !editedMoods.includes(m)).slice(0, 6).map((mood) => (
-                  <button
-                    key={mood}
-                    onClick={() => setEditedMoods(prev => [...prev, mood])}
-                    className="text-xs px-2 py-1 rounded-md bg-muted/30 hover:bg-secondary/20 hover:text-secondary transition-colors text-muted-foreground"
-                  >
-                    + {mood}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
+        </Card>
+      ) : (
+        <Card id="collab-edit-section" className="p-6 bg-card border-primary/30">
+          <div className="flex items-center gap-2 mb-6">
+            <Edit className="w-5 h-5 text-primary" />
+            <h2 className="text-xl text-foreground">Edit Playlist</h2>
+          </div>
 
-          {/* Manage Contributors */}
-          <div>
-            <label className="text-sm text-foreground mb-2 block">Contributors</label>
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {editedContributors.map((contributor) => (
-                  <div
-                    key={contributor.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border group hover:border-primary/30 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      {contributor.avatar ? (
-                        <img
-                          src={contributor.avatar}
-                          alt={contributor.name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                          <span className="text-primary">
-                            {contributor.name.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-sm text-foreground">{contributor.name}</p>
-                        <p className="text-xs text-muted-foreground">Contributor</p>
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleRemoveContributor(contributor.id)}
-                      className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive transition-all"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
+          <div className="space-y-6">
+            <div>
+              <label className="text-sm text-foreground mb-2 block">Playlist Title</label>
+              <Input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="bg-background border-border text-foreground" placeholder="Enter playlist title..." />
+            </div>
+
+            <div>
+              <label className="text-sm text-foreground mb-2 block">Description</label>
+              <Textarea value={editedDescription} onChange={(e) => setEditedDescription(e.target.value)} className="bg-background border-border text-foreground min-h-[80px]" placeholder="Describe your playlist..." />
+            </div>
+
+            <div>
+              <label className="text-sm text-foreground mb-2 block">Moods & Tags</label>
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {editedMoods.map((mood) => (
+                    <Badge key={mood} variant="outline" className="border-secondary/50 text-secondary pr-1 group hover:border-destructive/50 transition-colors">
+                      {mood}
+                      <button onClick={() => handleRemoveMood(mood)} className="ml-1.5 hover:text-destructive transition-colors">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <Input value={newMood} onChange={(e) => setNewMood(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleAddMood()} placeholder="Add a mood or tag..." className="flex-1 bg-background border-border text-foreground" />
+                  <Button size="sm" onClick={handleAddMood} className="bg-secondary hover:bg-secondary/90 text-white">
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add
+                  </Button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs text-muted-foreground">Suggestions:</span>
+                  {availableMoods.filter(m => !editedMoods.includes(m)).slice(0, 6).map((mood) => (
+                    <button key={mood} onClick={() => setEditedMoods(prev => [...prev, mood])} className="text-xs px-2 py-1 rounded-md bg-muted/30 hover:bg-secondary/20 hover:text-secondary transition-colors text-muted-foreground">
+                      + {mood}
+                    </button>
+                  ))}
+                </div>
               </div>
+            </div>
 
-              {/* Add Contributor */}
-              {showAddContributor ? (
-                <div className="p-4 rounded-lg bg-primary/5 border border-primary/30">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm text-foreground">Add Contributor</h4>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setShowAddContributor(false)}
-                      className="h-6 w-6 p-0"
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <div className="space-y-2">
-                    {mockAvailableContributors.filter(c => !editedContributors.some(ec => ec.id === c.id)).map((contributor) => (
-                      <button
-                        key={contributor.id}
-                        onClick={() => {
-                          handleAddContributor(contributor);
-                          toast.success(`Added ${contributor.name} as contributor`);
-                        }}
-                        className="w-full flex items-center gap-3 p-3 rounded-lg bg-background hover:bg-muted/30 border border-border hover:border-primary/50 transition-colors"
-                      >
+            <div>
+              <label className="text-sm text-foreground mb-2 block">Contributors</label>
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {editedContributors.map((contributor) => (
+                    <div key={contributor.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border group hover:border-primary/30 transition-colors">
+                      <div className="flex items-center gap-3">
                         {contributor.avatar ? (
-                          <img
-                            src={contributor.avatar}
-                            alt={contributor.name}
-                            className="w-10 h-10 rounded-full object-cover"
-                          />
+                          <img src={contributor.avatar} alt={contributor.name} className="w-10 h-10 rounded-full object-cover" />
                         ) : (
                           <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                            <span className="text-primary">
-                              {contributor.name.charAt(0).toUpperCase()}
-                            </span>
+                            <span className="text-primary">{contributor.name.charAt(0).toUpperCase()}</span>
                           </div>
                         )}
-                        <div className="text-left">
+                        <div>
                           <p className="text-sm text-foreground">{contributor.name}</p>
-                          <p className="text-xs text-muted-foreground">Click to add</p>
+                          <p className="text-xs text-muted-foreground">Contributor</p>
                         </div>
-                      </button>
-                    ))}
-                  </div>
+                      </div>
+                      <Button size="sm" variant="ghost" onClick={() => handleRemoveContributor(contributor.id)} className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive transition-all">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowAddContributor(true)}
-                  className="w-full border-dashed border-primary/30 hover:border-primary hover:bg-primary/5"
-                >
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Add Contributor
-                </Button>
-              )}
+
+                {showAddContributor ? (
+                  <div className="p-4 rounded-lg bg-primary/5 border border-primary/30">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm text-foreground">Add Contributor</h4>
+                      <Button size="sm" variant="ghost" onClick={() => setShowAddContributor(false)} className="h-6 w-6 p-0">
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {mockAvailableContributors.filter(c => !editedContributors.some(ec => ec.id === c.id)).map((contributor) => (
+                        <button key={contributor.id} onClick={() => { handleAddContributor(contributor); toast.success(`Added ${contributor.name} as contributor`); }} className="w-full flex items-center gap-3 p-3 rounded-lg bg-background hover:bg-muted/30 border border-border hover:border-primary/50 transition-colors">
+                          {contributor.avatar ? (
+                            <img src={contributor.avatar} alt={contributor.name} className="w-10 h-10 rounded-full object-cover" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                              <span className="text-primary">{contributor.name.charAt(0).toUpperCase()}</span>
+                            </div>
+                          )}
+                          <div className="text-left">
+                            <p className="text-sm text-foreground">{contributor.name}</p>
+                            <p className="text-xs text-muted-foreground">Click to add</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => setShowAddContributor(true)} className="w-full border-dashed border-primary/30 hover:border-primary hover:bg-primary/5">
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Add Contributor
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      )}
 
       {/* Tracks Section */}
       <Card className="p-6 bg-card border-border">
@@ -429,13 +450,12 @@ export function CollaborativePlaylistDetail({
             <Music className="w-5 h-5 text-primary" />
             Tracks ({tracks.length})
           </h3>
-          <Button
-            onClick={() => setShowAddTrack(!showAddTrack)}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Track
-          </Button>
+          {isEditMode && (
+            <Button onClick={() => setShowAddTrack(!showAddTrack)} className="bg-primary hover:bg-primary/90 text-primary-foreground">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Track
+            </Button>
+          )}
         </div>
 
         {/* Add Track Section */}
@@ -512,7 +532,21 @@ export function CollaborativePlaylistDetail({
             tracks.map((track, index) => (
               <div
                 key={track.id}
-                className="group flex items-center gap-4 p-3 rounded-lg hover:bg-muted/30 transition-colors"
+                className="group flex items-center gap-4 p-3 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer"
+                onClick={() => {
+                  // Reuse the global album/song modal so track rows open the same review flow as the rest of the app.
+                  onOpenTrack?.({
+                    id: track.id,
+                    type: "track",
+                    title: track.title,
+                    artist: track.artist,
+                    cover: track.cover || "",
+                    album: track.album,
+                    previewUrl: undefined,
+                    spotifyUrl: undefined,
+                    appleMusicUrl: undefined,
+                  });
+                }}
               >
                 {/* Track Number */}
                 <div className="w-8 text-center">
@@ -556,16 +590,21 @@ export function CollaborativePlaylistDetail({
                 )}
 
                 {/* Actions */}
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => handleRemoveTrack(track.id)}
-                    className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
+                {isEditMode && (
+                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveTrack(track.id);
+                      }}
+                      className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
             ))
           )}

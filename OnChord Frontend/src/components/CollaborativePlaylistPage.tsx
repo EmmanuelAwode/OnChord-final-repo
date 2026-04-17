@@ -4,9 +4,9 @@ import { Button } from "./ui/button";
 import { Avatar } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Tabs, TabsContent } from "./ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
-import { UserPlus, Share2, Music, Clock, Sparkles, MessageSquare, Send, Search, Plus, Image, Smile, X, Loader2, Trash2 } from "lucide-react";
+import { UserPlus, Share2, Music, Clock, Sparkles, Search, Plus, Loader2, Trash2, Send, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
@@ -29,6 +29,50 @@ interface SearchTrackItem {
   url?: string;
 }
 
+function isDuplicateTrackError(error: any): boolean {
+  if (!error) return false;
+  const message = String(error.message || "").toLowerCase();
+  const details = String(error.details || "").toLowerCase();
+  return (
+    error.status === 409 ||
+    error.code === "23505" ||
+    message.includes("duplicate") ||
+    message.includes("unique") ||
+    details.includes("playlist_id") && details.includes("track_id")
+  );
+}
+
+function isPermissionDeniedError(error: any): boolean {
+  if (!error) return false;
+  const message = String(error.message || "").toLowerCase();
+  return error.status === 403 || error.code === "42501" || message.includes("permission denied");
+}
+
+function isUndefinedColumnError(error: any): boolean {
+  if (!error) return false;
+  const message = String(error.message || "").toLowerCase();
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    message.includes("column") && message.includes("does not exist") ||
+    message.includes("schema cache")
+  );
+}
+
+function isMissingLegacyPlaylistFkError(error: any): boolean {
+  if (!error) return false;
+  const message = String(error.message || "").toLowerCase();
+  const details = String(error.details || "").toLowerCase();
+  return (
+    error.code === "23503" &&
+    (
+      message.includes("playlist_tracks_playlist_id_fkey") ||
+      details.includes("key is not present in table \"playlists\"") ||
+      details.includes("table \"playlists\"")
+    )
+  );
+}
+
 interface PlaylistTrack {
   rowId?: string;
   id: string;
@@ -37,6 +81,7 @@ interface PlaylistTrack {
   durationMs?: number;
   addedById?: string;
   addedBy: string;
+  addedByAvatar?: string;
   timestamp: string;
   addedAtRaw?: string;
   cover?: string;
@@ -47,31 +92,11 @@ interface PlaylistTrack {
   appleMusicUrl?: string;
 }
 
-interface ChatTrack {
-  title: string;
-  artist: string;
-  cover: string;
-  rating?: number;
-}
-
-interface ChatMessage {
-  id: string;
-  userId: string;
-  userName: string;
-  userAvatar: string;
-  message: string;
-  timestamp: string;
-  type: "text" | "image" | "gif" | "track";
-  imageUrl?: string;
-  gifUrl?: string;
-  track?: ChatTrack;
-}
-
 interface CollaborativePlaylistPageProps {
   onNavigate?: (page: string) => void;
   playlistId?: string;
   playlists: any[];
-  setPlaylists: (playlists: any[]) => void;
+  setPlaylists: React.Dispatch<React.SetStateAction<any[]>>;
   onBack?: () => void;
   canGoBack?: boolean;
   onOpenTrack?: (trackData: any) => void;
@@ -109,6 +134,7 @@ function mapTrackRow(row: any): PlaylistTrack {
     durationMs: typeof row.duration_ms === "number" ? row.duration_ms : undefined,
     addedById: row.added_by || undefined,
     addedBy: row.added_by_name || "Collaborator",
+    addedByAvatar: row.added_by_avatar || undefined,
     timestamp: formatRelativeTime(row.added_at),
     addedAtRaw: row.added_at || undefined,
     cover: row.album_cover || undefined,
@@ -150,10 +176,8 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
         }
       : undefined
   );
-  const [newMessage, setNewMessage] = useState("");
   const [showAddTrackModal, setShowAddTrackModal] = useState(false);
   const [showAddMoodModal, setShowAddMoodModal] = useState(false);
-  const [showGifModal, setShowGifModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [inviteSearchQuery, setInviteSearchQuery] = useState("");
@@ -163,18 +187,15 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const [isSendingInvites, setIsSendingInvites] = useState(false);
   const [isDeletingPlaylist, setIsDeletingPlaylist] = useState(false);
   const [newMood, setNewMood] = useState("");
-  const [gifSearchQuery, setGifSearchQuery] = useState("");
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [showShareTrackModal, setShowShareTrackModal] = useState(false);
   const [tracks, setTracks] = useState<PlaylistTrack[]>((playlist?.tracks || []) as PlaylistTrack[]);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
   const [isAddingTrack, setIsAddingTrack] = useState(false);
   const [removingTrackRowId, setRemovingTrackRowId] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [searchResults, setSearchResults] = useState<SearchTrackItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const trackMetadataCacheRef = useRef<Record<string, Partial<PlaylistTrack>>>({});
   const isCurrentUserContributor = !!currentUserId && !!playlist?.contributors?.some((c: any) => c.id === currentUserId);
   const isPendingInvite = !!pendingInvite && pendingInvite.playlistId === (playlist?.id || playlistId) && !isCurrentUserContributor && !hasAcceptedInvite;
   const canModifyTracks = !!currentUserId && (isCurrentUserContributor || hasAcceptedInvite);
@@ -201,34 +222,65 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     async function loadTracks() {
       setIsLoadingTracks(true);
       try {
-        let { data, error } = await supabase
+        // Use only cross-schema columns in the first query to avoid 400s
+        // when optional columns are missing in legacy DB variants.
+        const baseSelect = "id, track_id, track_title, track_artist, album_cover, added_by, added_at, position";
+        const { data, error } = await supabase
           .from("playlist_tracks")
-          .select("id, track_id, track_title, track_artist, album_cover, duration_ms, added_by, added_by_name, added_at, position")
+          .select(baseSelect)
           .eq("playlist_id", playlist.id)
           .order("position", { ascending: true })
           .order("added_at", { ascending: true });
 
-        // Backward-compatible fallback for older schemas missing duration_ms.
-        if (error && String(error.message || "").toLowerCase().includes("duration_ms")) {
-          const fallback = await supabase
-            .from("playlist_tracks")
-            .select("id, track_id, track_title, track_artist, album_cover, added_by, added_by_name, added_at, position")
-            .eq("playlist_id", playlist.id)
-            .order("position", { ascending: true })
-            .order("added_at", { ascending: true });
-
-          data = fallback.data;
-          error = fallback.error;
-        }
-
         if (error) throw error;
         if (!active) return;
 
-        const mapped = (data || []).map(mapTrackRow);
+        const contributorById = new Map<string, { name: string; avatar?: string }>();
+        for (const contributor of playlist?.contributors || []) {
+          if (contributor?.id) {
+            contributorById.set(String(contributor.id), {
+              name: contributor.name || "Collaborator",
+              avatar: contributor.avatar,
+            });
+          }
+        }
+
+        const missingProfileIds = Array.from(
+          new Set(
+            (data || [])
+              .map((row: any) => String(row.added_by || ""))
+              .filter((id) => !!id && !contributorById.has(id))
+          )
+        );
+
+        if (missingProfileIds.length > 0) {
+          try {
+            const profiles = await getProfiles(missingProfileIds as string[]);
+            for (const p of profiles) {
+              contributorById.set(p.id, {
+                name: p.display_name || p.username || "Collaborator",
+                avatar: p.avatar_url || undefined,
+              });
+            }
+          } catch {
+            // Non-blocking enrichment fallback.
+          }
+        }
+
+        const mapped = (data || []).map((row: any) => {
+          const fallbackContributor = row.added_by ? contributorById.get(String(row.added_by)) : undefined;
+          const cachedMetadata = trackMetadataCacheRef.current[String(row.id)] || trackMetadataCacheRef.current[String(row.track_id)] || {};
+          return mapTrackRow({
+            ...row,
+            added_by_name: fallbackContributor?.name,
+            added_by_avatar: fallbackContributor?.avatar,
+            duration_ms: row.duration_ms ?? cachedMetadata.durationMs,
+          });
+        });
         setTracks(mapped);
 
         setPlaylists(
-          playlists.map((p) =>
+          (prev) => prev.map((p: any) =>
             p.id === playlist.id
               ? {
                   ...p,
@@ -297,30 +349,6 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     return () => clearTimeout(timer);
   }, [searchQuery]);
   
-  // Different messages for each playlist (start empty, real messages would come from backend)
-  const getInitialMessages = (_playlistId: string): ChatMessage[] => {
-    // In a real implementation, messages would be fetched from Supabase.
-    return [];
-  };
-
-  const [messages, setMessages] = useState<ChatMessage[]>(getInitialMessages(playlistId || "default"));
-
-  // Scroll to bottom when messages change
-  const scrollToBottom = (smooth = true) => {
-    if (messagesContainerRef.current) {
-      const scrollHeight = messagesContainerRef.current.scrollHeight;
-      messagesContainerRef.current.scrollTo({
-        top: scrollHeight,
-        behavior: smooth ? "smooth" : "auto"
-      });
-    }
-  };
-
-  // Scroll to bottom on initial load
-  useEffect(() => {
-    setTimeout(() => scrollToBottom(false), 50);
-  }, []);
-
   // Load mutual-follow users for invite flow.
   useEffect(() => {
     if (!showInviteModal) {
@@ -365,143 +393,60 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     };
   }, [showInviteModal]);
 
-  // Scroll to bottom when new messages are added
-  useEffect(() => {
-    scrollToBottom(true);
-  }, [messages]);
+  const handleInviteDecision = async (decision: "accept" | "decline") => {
+    if (!pendingInvite?.notificationId) {
+      toast.error("Invite details are missing");
+      return;
+    }
 
-  const handleSendMessage = () => {
-    if (!newMessage.trim() && !selectedImage) return;
-    
-    const msg: ChatMessage = {
-      id: `msg${Date.now()}`,
-      userId: profile?.id || "current-user",
-      userName: profile?.display_name || profile?.username || "You",
-      userAvatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=user`,
-      message: newMessage,
-      timestamp: "Just now",
-      type: selectedImage ? "image" : "text",
-      imageUrl: selectedImage || undefined,
-    };
-
-    setMessages((prev) => [...prev, msg]);
-    setNewMessage("");
-    setSelectedImage(null);
-  };
-
-  const handleSendGif = (gifUrl: string) => {
-    const msg: ChatMessage = {
-      id: `msg${Date.now()}`,
-      userId: profile?.id || "current-user",
-      userName: profile?.display_name || profile?.username || "You",
-      userAvatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=user`,
-      message: "",
-      timestamp: "Just now",
-      type: "gif",
-      gifUrl: gifUrl,
-    };
-
-    setMessages((prev) => [...prev, msg]);
-    setShowGifModal(false);
-    setGifSearchQuery("");
-    toast.success("GIF sent!");
-  };
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        toast.error("Please select an image file");
-        return;
+    setInviteResponseLoading(true);
+    try {
+      if (decision === "accept") {
+        await respondToPlaylistInvite(pendingInvite.notificationId, "accept");
+        setHasAcceptedInvite(true);
+        setPlaylists((prev) =>
+          prev.map((p: any) =>
+            p.id === (playlist?.id || playlistId)
+              ? {
+                  ...p,
+                  contributors: Array.from(
+                    new Map([
+                      ...(p.contributors || []).map((c: any) => [c.id, c]),
+                      [profile?.id || currentUserId || "current-user", {
+                        id: profile?.id || currentUserId || "current-user",
+                        name: profile?.display_name || profile?.username || "You",
+                        avatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=user`,
+                      }],
+                    ])
+                  ).map(([, value]) => value),
+                }
+              : p
+          )
+        );
+        toast.success("Invite accepted");
+      } else {
+        await respondToPlaylistInvite(pendingInvite.notificationId, "decline");
+        toast.success("Invite declined");
+        onInviteResolved?.();
+        onNavigate?.("playlist");
       }
-      
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("Image must be less than 5MB");
-        return;
-      }
-      
-      // Create preview URL
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result as string);
-        toast.success("Image selected! Click send to share it.");
-      };
-      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("Failed to respond to invite:", error);
+      toast.error("Could not process invite response");
+    } finally {
+      setInviteResponseLoading(false);
     }
   };
 
-  const handleShareTrack = (track: SearchTrackItem) => {
-    const msg: ChatMessage = {
-      id: `msg${Date.now()}`,
-      userId: profile?.id || "current-user",
-      userName: profile?.display_name || profile?.username || "You",
-      userAvatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=user`,
-      message: "",
-      timestamp: "Just now",
-      type: "track",
-      track: {
-        title: track.title,
-        artist: track.artist,
-        cover: track.cover,
-        rating: 0,
-      },
-    };
-
-    setMessages((prev) => [...prev, msg]);
-    setShowShareTrackModal(false);
-    setSearchQuery("");
-    toast.success(`Shared "${track.title}"!`);
-  };
-
   const handleAddTrack = async (track: SearchTrackItem) => {
-      const handleInviteDecision = async (decision: "accept" | "decline") => {
-        if (!pendingInvite?.notificationId) {
-          toast.error("Invite details are missing");
-          return;
-        }
-
-        setInviteResponseLoading(true);
-        try {
-          if (decision === "accept") {
-            await respondToPlaylistInvite(pendingInvite.notificationId, "accept");
-            setHasAcceptedInvite(true);
-            setPlaylists((prev) =>
-              prev.map((p) =>
-                p.id === (playlist?.id || playlistId)
-                  ? {
-                      ...p,
-                      contributors: Array.from(
-                        new Map([
-                          ...(p.contributors || []).map((c: any) => [c.id, c]),
-                          [profile?.id || currentUserId || "current-user", {
-                            id: profile?.id || currentUserId || "current-user",
-                            name: profile?.display_name || profile?.username || "You",
-                            avatar: profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=user`,
-                          }],
-                        ])
-                      ).map(([, value]) => value),
-                    }
-                  : p
-              )
-            );
-            toast.success("Invite accepted");
-          } else {
-            await respondToPlaylistInvite(pendingInvite.notificationId, "decline");
-            toast.success("Invite declined");
-            onInviteResolved?.();
-            onNavigate?.("playlist");
-          }
-        } catch (error) {
-          console.error("Failed to respond to invite:", error);
-          toast.error("Could not process invite response");
-        } finally {
-          setInviteResponseLoading(false);
-        }
-      };
     if (!playlist?.id) {
       toast.error("Playlist not found");
+      return;
+    }
+
+    // Prevent duplicate insert attempts from UI before hitting DB constraints.
+    if (tracks.some((t) => t.id === track.id)) {
+      toast.info("That track is already in this playlist.");
       return;
     }
 
@@ -516,40 +461,160 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
 
       const nextPosition = tracks.length;
 
-      const { error } = await supabase.from("playlist_tracks").insert({
+      const minimumInsertRow = {
         playlist_id: playlist.id,
         track_id: track.id,
         track_title: track.title,
         track_artist: track.artist,
-        album_name: track.album || null,
         album_cover: track.cover,
-        duration_ms: track.durationMs || null,
-        preview_url: track.previewUrl || null,
-        apple_music_url: track.url || null,
         added_by: currentUserId,
+        position: nextPosition,
+      };
+
+      const richInsertRow = {
+        ...minimumInsertRow,
+        duration_ms: track.durationMs ?? null,
         added_by_name: profile?.display_name || profile?.username || session.session?.user?.email || "Collaborator",
         added_by_avatar: profile?.avatar_url || null,
-        position: nextPosition,
-      });
+        preview_url: track.previewUrl || null,
+        spotify_url: track.url || null,
+        apple_music_url: track.url || null,
+      };
+
+      // Try a richer payload first so duration/adder metadata are stored when the
+      // schema supports it, then fall back to the legacy-safe payload.
+      let insertResult = await supabase
+        .from("playlist_tracks")
+        .insert(richInsertRow)
+        .select("id, added_at")
+        .single();
+      let error = insertResult.error;
+
+      if (error && isUndefinedColumnError(error)) {
+        const fallbackInsert = await supabase
+          .from("playlist_tracks")
+          .insert(minimumInsertRow)
+          .select("id, added_at")
+          .single();
+        insertResult = fallbackInsert;
+        error = fallbackInsert.error;
+      }
+
+      // Legacy schema path: playlist_tracks may still FK to playlists(id).
+      // Mirror the collaborative playlist row into playlists and retry once.
+      if (error && isMissingLegacyPlaylistFkError(error)) {
+        const collaboratorIds = Array.isArray(playlist?.contributors)
+          ? playlist.contributors
+              .map((c: any) => c?.id)
+              .filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
+          : [];
+
+        const legacyMirrorPayload = {
+          id: playlist.id,
+          name: playlist.title || "Collaborative Playlist",
+          description: playlist.description || "A collaborative playlist",
+          cover_image: playlist.cover || null,
+          creator_id: currentUserId,
+          collaborators: Array.from(new Set([currentUserId, ...collaboratorIds])),
+          is_public: false,
+        };
+
+        const mirrorAttempt = await supabase
+          .from("playlists")
+          .upsert(legacyMirrorPayload, { onConflict: "id" });
+
+        if (!mirrorAttempt.error) {
+          const retryInsert = await supabase
+            .from("playlist_tracks")
+            .insert(richInsertRow)
+            .select("id, added_at")
+            .single();
+          if (retryInsert.error && isUndefinedColumnError(retryInsert.error)) {
+            const legacyRetry = await supabase
+              .from("playlist_tracks")
+              .insert(minimumInsertRow)
+              .select("id, added_at")
+              .single();
+            insertResult = legacyRetry;
+            error = legacyRetry.error;
+          } else {
+            insertResult = retryInsert;
+            error = retryInsert.error;
+          }
+        }
+      }
 
       if (error) throw error;
+
+      const insertedTrack: PlaylistTrack = {
+        rowId: String(insertResult.data?.id || `${playlist.id}:${track.id}`),
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        durationMs: typeof track.durationMs === "number" ? track.durationMs : undefined,
+        addedById: currentUserId,
+        addedBy: profile?.display_name || profile?.username || session.session?.user?.email || "Collaborator",
+        addedByAvatar: profile?.avatar_url || undefined,
+        timestamp: "Just now",
+        addedAtRaw: insertResult.data?.added_at || new Date().toISOString(),
+        cover: track.cover,
+        albumCover: track.cover,
+        album: track.album,
+        previewUrl: track.previewUrl,
+        appleMusicUrl: track.url,
+      };
+
+      trackMetadataCacheRef.current[insertedTrack.rowId || insertedTrack.id] = {
+        durationMs: insertedTrack.durationMs,
+        addedBy: insertedTrack.addedBy,
+        addedById: insertedTrack.addedById,
+        addedByAvatar: insertedTrack.addedByAvatar,
+      };
+      trackMetadataCacheRef.current[insertedTrack.id] = {
+        durationMs: insertedTrack.durationMs,
+        addedBy: insertedTrack.addedBy,
+        addedById: insertedTrack.addedById,
+        addedByAvatar: insertedTrack.addedByAvatar,
+      };
+
+      setTracks((prev) => (prev.some((t) => t.id === insertedTrack.id) ? prev : [...prev, insertedTrack]));
+      setPlaylists((prev) =>
+        prev.map((p: any) =>
+          p.id === playlist.id
+            ? { ...p, trackCount: (p.trackCount || 0) + 1, lastUpdated: "Just now" }
+            : p
+        )
+      );
 
       setShowAddTrackModal(false);
       setSearchQuery("");
       toast.success(`Added "${track.title}" to the playlist`);
     } catch (error) {
       console.error("Failed to add track to collaborative playlist:", error);
-      toast.error("Failed to add track. Please try again.");
+      console.error("Add track error payload:", JSON.stringify(error, null, 2));
+      if (isPolicyRecursionError(error)) {
+        toast.error("Collaborative playlist policies are recursive. Apply migration 021_fix_collab_policy_recursion.sql.");
+      } else if (isPermissionDeniedError(error)) {
+        toast.error("You do not have permission to add tracks yet. Refresh after accepting the invite.");
+      } else if (isDuplicateTrackError(error)) {
+        toast.info("That track is already in this playlist.");
+        setShowAddTrackModal(false);
+        setSearchQuery("");
+      } else {
+        const message = (error as any)?.message || (error as any)?.details || "Failed to add track. Please try again.";
+        toast.error(String(message));
+      }
     } finally {
       setIsAddingTrack(false);
     }
   };
 
-  const hasCompleteDurations = tracks.length > 0 && tracks.every((track) => typeof track.durationMs === "number" && track.durationMs > 0);
-  const totalDurationMs = hasCompleteDurations
-    ? tracks.reduce((sum, track) => sum + (track.durationMs || 0), 0)
-    : 0;
-  const durationDisplay = tracks.length === 0 ? "0m" : hasCompleteDurations ? formatDurationTotal(totalDurationMs) : "Unknown";
+  const knownDurationMs = tracks.reduce(
+    (sum, track) => sum + (typeof track.durationMs === "number" && track.durationMs > 0 ? track.durationMs : 0),
+    0
+  );
+  const hasAnyKnownDuration = tracks.some((track) => typeof track.durationMs === "number" && track.durationMs > 0);
+  const durationDisplay = tracks.length === 0 ? "0m" : hasAnyKnownDuration ? formatDurationTotal(knownDurationMs) : "Unknown";
 
   const handleRemoveTrack = async (track: PlaylistTrack) => {
     if (!playlist?.id || !track.rowId) {
@@ -566,6 +631,16 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
         .eq("playlist_id", playlist.id);
 
       if (error) throw error;
+      setTracks((prev) => prev.filter((t) => t.rowId !== track.rowId));
+      if (track.rowId) delete trackMetadataCacheRef.current[track.rowId];
+      delete trackMetadataCacheRef.current[track.id];
+      setPlaylists((prev) =>
+        prev.map((p: any) =>
+          p.id === playlist.id
+            ? { ...p, trackCount: Math.max(0, (p.trackCount || 1) - 1), lastUpdated: "Just now" }
+            : p
+        )
+      );
       toast.success(`Removed "${track.title}"`);
     } catch (error) {
       console.error("Failed to remove track from collaborative playlist:", error);
@@ -582,39 +657,70 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     "Collaborative", "Energetic", "Mellow", "Upbeat", "Late Night"
   ];
 
-  // Mock GIF suggestions - in real app would use Giphy/Tenor API
-  const gifSuggestions = [
-    {
-      id: "gif1",
-      url: "https://media.giphy.com/media/l0HlNQ03J5JxX6lva/giphy.gif",
-      title: "Dancing"
-    },
-    {
-      id: "gif2",
-      url: "https://media.giphy.com/media/l378khQxt68syiNJm/giphy.gif",
-      title: "Music Vibes"
-    },
-    {
-      id: "gif3",
-      url: "https://media.giphy.com/media/xUPGcC0R9QjyxkPnS8/giphy.gif",
-      title: "Fire"
-    },
-    {
-      id: "gif4",
-      url: "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
-      title: "Party"
-    },
-    {
-      id: "gif5",
-      url: "https://media.giphy.com/media/26u4cqiYI30juCOGY/giphy.gif",
-      title: "Thumbs Up"
-    },
-    {
-      id: "gif6",
-      url: "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif",
-      title: "Cool"
-    },
-  ];
+  const handlePlaylistCoverSelect = async (event: any) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be less than 5MB");
+      return;
+    }
+
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image"));
+      reader.readAsDataURL(file);
+    }).catch(() => "");
+
+    if (!dataUrl || !playlist?.id) {
+      toast.error("Failed to load image");
+      return;
+    }
+
+    const updateAttempts: Array<() => Promise<{ error: any }>> = [
+      () => supabase.from("playlists").update({ cover_image: dataUrl }).eq("id", playlist.id),
+      () => supabase.from("collaborative_playlists").update({ cover_image: dataUrl }).eq("id", playlist.id),
+      () => supabase.from("collaborative_playlists").update({ cover_url: dataUrl as any }).eq("id", playlist.id),
+    ];
+
+    let coverSaved = false;
+    let lastError: any = null;
+
+    for (const attempt of updateAttempts) {
+      const { error } = await attempt();
+      if (!error) {
+        coverSaved = true;
+        break;
+      }
+      if (isUndefinedColumnError(error)) {
+        lastError = error;
+        continue;
+      }
+      lastError = error;
+    }
+
+    setPlaylists((prev) =>
+      prev.map((p: any) =>
+        p.id === playlist.id
+          ? { ...p, cover: dataUrl, lastUpdated: "Just now" }
+          : p
+      )
+    );
+
+    if (coverSaved) {
+      toast.success("Playlist cover updated");
+    } else {
+      console.warn("Cover persisted only locally:", lastError);
+      toast.warning("Cover updated for this session, but could not be saved to database.");
+    }
+  };
 
   const handleAddMood = (mood: string) => {
     if (!mood.trim()) return;
@@ -802,11 +908,29 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       <Card className="p-8 bg-card border-border shadow-lg">
         <div className="flex flex-col md:flex-row gap-8">
           {/* Playlist Cover */}
-          <img
-            src={playlist.cover}
-            alt={playlist.title}
-            className="w-full md:w-48 h-48 object-cover rounded-xl shadow-lg"
-          />
+          <div className="relative w-full md:w-48 h-48">
+            <img
+              src={playlist.cover}
+              alt={playlist.title}
+              className="w-full h-full object-cover rounded-xl shadow-lg"
+            />
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePlaylistCoverSelect}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="absolute bottom-2 right-2 bg-background/90 border-border"
+              onClick={() => coverInputRef.current?.click()}
+            >
+              <Camera className="w-4 h-4 mr-1" />
+              Cover
+            </Button>
+          </div>
 
           {/* Playlist Info */}
           <div className="flex-1 space-y-4">
@@ -921,26 +1045,8 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
         </div>
       </Card>
 
-      {/* Tabs for Tracks and Chat */}
+      {/* Tracks */}
       <Tabs defaultValue="tracks" className="w-full">
-        <TabsList className="bg-card border border-border w-full md:w-auto grid grid-cols-2 gap-2 p-1">
-          <TabsTrigger
-            value="tracks"
-            className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-primary/80 data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
-          >
-            <Music className="w-4 h-4 mr-2" />
-            Tracks ({tracks.length})
-          </TabsTrigger>
-          <TabsTrigger
-            value="chat"
-            className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-secondary data-[state=active]:to-secondary/80 data-[state=active]:text-secondary-foreground data-[state=active]:shadow-md"
-          >
-            <MessageSquare className="w-4 h-4 mr-2" />
-            Chat ({messages.length})
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Tracks Tab */}
         <TabsContent value="tracks" className="mt-6">
           <Card className="p-6 bg-card border-border">
             <div className="flex items-center justify-between mb-6">
@@ -1009,10 +1115,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                   <div className="flex items-center gap-2">
                     <Avatar className="w-8 h-8">
                       <img
-                        src={
-                          playlist?.contributors?.find((c: any) => c.name === track.addedBy)
-                            ?.avatar || '/placeholder-avatar.png'
-                        }
+                        src={track.addedByAvatar || '/placeholder-avatar.png'}
                         alt={track.addedBy}
                         className="object-cover"
                       />
@@ -1050,166 +1153,6 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                   )}
                 </div>
               ))}
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Chat Tab */}
-        <TabsContent value="chat" className="mt-6">
-          <Card className="p-6 bg-card border-border">
-            <h2 className="text-xl text-foreground mb-6">Playlist Chat</h2>
-            
-            {/* Messages */}
-            <div ref={messagesContainerRef} className="space-y-4 mb-6 max-h-96 overflow-y-auto pr-2 nav-scroll">
-              {messages.map((msg, index) => {
-                const isCurrentUser = msg.userId === profile?.id || msg.userId === "current-user";
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex gap-3 animate-slide-in ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}
-                    style={{ animationDelay: `${index * 0.05}s` }}
-                  >
-                    <Avatar className="w-10 h-10 flex-shrink-0 border-2 border-primary">
-                      <img src={msg.userAvatar} alt={msg.userName} className="object-cover" />
-                    </Avatar>
-                    
-                    <div className={`flex-1 ${isCurrentUser ? 'text-right' : 'text-left'}`}>
-                      <div className={`flex items-center gap-2 mb-1 ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
-                        <span className="text-sm font-medium text-foreground">
-                          {msg.userName}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {msg.timestamp}
-                        </span>
-                      </div>
-                      <div
-                        className={`inline-block rounded-lg max-w-md ${
-                          msg.type === 'gif' || msg.type === 'image' || msg.type === 'track' ? 'p-1' : 'p-3'
-                        } ${
-                          msg.type === 'track' ? 'bg-card border border-border' :
-                          isCurrentUser
-                            ? 'bg-gradient-to-br from-primary to-primary/80 text-primary-foreground'
-                            : 'bg-muted text-foreground'
-                        }`}
-                      >
-                        {msg.type === 'gif' && msg.gifUrl && (
-                          <img 
-                            src={msg.gifUrl} 
-                            alt="GIF" 
-                            className="rounded-lg max-w-full h-auto max-h-48 object-cover"
-                          />
-                        )}
-                        {msg.type === 'image' && msg.imageUrl && (
-                          <img 
-                            src={msg.imageUrl} 
-                            alt="Shared image" 
-                            className="rounded-lg max-w-full h-auto max-h-64 object-cover"
-                          />
-                        )}
-                        {msg.type === 'track' && msg.track && (
-                          <div className="p-3">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Music className="w-4 h-4 text-primary" />
-                              <span className="text-xs text-muted-foreground">Shared a track</span>
-                            </div>
-                            <div className="flex gap-3 bg-background p-3 rounded-lg">
-                              <img
-                                src={msg.track.cover}
-                                alt={msg.track.title}
-                                className="w-16 h-16 rounded object-cover"
-                              />
-                              <div>
-                                <p className="text-sm text-foreground">{msg.track.title}</p>
-                                <p className="text-xs text-muted-foreground">{msg.track.artist}</p>
-                                {msg.track.rating && (
-                                  <Badge className="bg-primary/20 text-primary border-0 mt-1">
-                                    ★ {msg.track.rating}
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        {msg.message && <p className="text-sm">{msg.message}</p>}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Selected Image Preview */}
-            {selectedImage && (
-              <div className="mb-4 relative inline-block">
-                <img 
-                  src={selectedImage} 
-                  alt="Selected" 
-                  className="max-h-32 rounded-lg border-2 border-primary"
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setSelectedImage(null)}
-                  className="absolute -top-2 -right-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full w-6 h-6 p-0"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            )}
-
-            {/* Message Input */}
-            <div className="flex gap-2">
-              <div className="flex gap-1 flex-shrink-0">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageSelect}
-                  className="hidden"
-                  id="image-upload"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => document.getElementById('image-upload')?.click()}
-                  className="text-muted-foreground hover:text-primary hover:bg-primary/10"
-                  title="Add Image"
-                >
-                  <Image className="w-5 h-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowGifModal(true)}
-                  className="text-muted-foreground hover:text-accent hover:bg-accent/10"
-                  title="Add GIF"
-                >
-                  <Smile className="w-5 h-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowShareTrackModal(true)}
-                  className="text-muted-foreground hover:text-secondary hover:bg-secondary/10"
-                  title="Share Track"
-                >
-                  <Music className="w-5 h-5" />
-                </Button>
-              </div>
-              <Input
-                placeholder="Type a message..."
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                className="flex-1 bg-background border-2 border-border focus:border-primary"
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!newMessage.trim() && !selectedImage}
-                className="bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-white shadow-md hover:shadow-lg hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
             </div>
           </Card>
         </TabsContent>
@@ -1432,131 +1375,6 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                 </div>
               </div>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* GIF Modal */}
-      <Dialog open={showGifModal} onOpenChange={setShowGifModal}>
-        <DialogContent className="bg-card border-border max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Choose a GIF</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Select a GIF to send in the chat
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            {/* GIF Search */}
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search GIFs..."
-                value={gifSearchQuery}
-                onChange={(e) => setGifSearchQuery(e.target.value)}
-                className="flex-1 bg-background border-border text-foreground placeholder:text-muted-foreground"
-              />
-              <Button
-                variant="outline"
-                className="border-border text-foreground hover:bg-muted"
-              >
-                <Search className="w-4 h-4" />
-              </Button>
-            </div>
-
-            {/* GIF Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto nav-scroll">
-              {gifSuggestions.map((gif) => (
-                <div
-                  key={gif.id}
-                  className="relative group cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-primary transition-all aspect-square"
-                  onClick={() => handleSendGif(gif.url)}
-                >
-                  <img
-                    src={gif.url}
-                    alt={gif.title}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                    <span className="text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                      Send
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Powered by notice */}
-            <p className="text-xs text-muted-foreground text-center">
-              GIFs powered by GIPHY
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Share Track Modal */}
-      <Dialog open={showShareTrackModal} onOpenChange={setShowShareTrackModal}>
-        <DialogContent className="bg-card border-border max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Share a Track</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Search and share a track to the chat
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            {/* Search Input */}
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search for a track or album..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 bg-background border-border text-foreground placeholder:text-muted-foreground"
-              />
-              <Button
-                variant="outline"
-                className="border-border text-foreground hover:bg-muted"
-              >
-                <Search className="w-4 h-4" />
-              </Button>
-            </div>
-
-            {/* Search Results */}
-            <div className="space-y-2 max-h-96 overflow-y-auto nav-scroll">
-              {isSearching ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : !searchQuery.trim() ? (
-                <div className="flex items-center justify-center py-8 text-muted-foreground">
-                  <p>Search for a track to share</p>
-                </div>
-              ) : searchResults.length === 0 ? (
-                <div className="flex items-center justify-center py-8 text-muted-foreground">
-                  <p>No tracks found</p>
-                </div>
-              ) : searchResults.map((track) => (
-                <div
-                  key={track.id}
-                  className="flex items-center gap-4 p-3 bg-background rounded-lg hover:bg-muted transition cursor-pointer group"
-                >
-                  <img
-                    src={track.cover}
-                    alt={track.title}
-                    className="w-12 h-12 rounded object-cover"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-foreground truncate">{track.title}</p>
-                    <p className="text-sm text-muted-foreground truncate">{track.artist}{track.album ? ` • ${track.album}` : ""}</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() => handleShareTrack(track)}
-                    className="bg-primary hover:bg-primary/90 text-primary-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <Share2 className="w-4 h-4 mr-1" />
-                    Share
-                  </Button>
-                </div>
-              ))}
-            </div>
           </div>
         </DialogContent>
       </Dialog>

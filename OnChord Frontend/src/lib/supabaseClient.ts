@@ -1,13 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 import { requireEnv } from "./env";
 
-let supabase: ReturnType<typeof createClient>;
+let supabase: any;
 
 try {
   const supabaseUrl = requireEnv("VITE_SUPABASE_URL");
   const supabaseAnonKey = requireEnv("VITE_SUPABASE_ANON_KEY");
 
-  supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  supabase = createClient<any>(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,

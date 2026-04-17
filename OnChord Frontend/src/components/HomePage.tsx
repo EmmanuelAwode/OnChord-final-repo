@@ -103,8 +103,9 @@ export function HomePage({ onNavigate, username, onOpenAlbum, onEditReview, revi
           .select("display_name")
           .eq("id", uid)
           .single();
-        if (profile?.display_name) {
-          setRealDisplayName(profile.display_name.split(' ')[0]);
+          const profileData = profile as { display_name?: string } | null;
+          if (profileData?.display_name) {
+            setRealDisplayName(profileData.display_name.split(' ')[0]);
         }
         // Load follower count
         const count = await getFollowerCount(uid);

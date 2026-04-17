@@ -16,6 +16,28 @@ import { respondToPlaylistInvite as respondToPlaylistInviteRpc } from '../lib/ap
 import { toast } from 'sonner';
 
 const isPolicyRecursionError = (error: any): boolean => !!error && error.code === '42P17';
+const isMissingCollaborativePlaylistError = (error: any): boolean => {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  const details = String(error.details || '').toLowerCase();
+  return error.code === '23503' && (
+    message.includes('playlist_collaborators_playlist_id_fkey') ||
+    details.includes('collaborative_playlists')
+  );
+};
+const isInviteConflictError = (error: any): boolean => {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  const details = String(error.details || '').toLowerCase();
+  return (
+    error.status === 409 ||
+    error.code === '409' ||
+    error.code === '23505' ||
+    message.includes('invite not found') ||
+    message.includes('duplicate') ||
+    details.includes('duplicate')
+  );
+};
 
 export default function NotificationsPanel() {
   const {
@@ -30,6 +52,7 @@ export default function NotificationsPanel() {
 
   const [isOpen, setIsOpen] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
 
   const respondToPlaylistInvite = async (
     notification: any,
@@ -38,44 +61,18 @@ export default function NotificationsPanel() {
   ) => {
     e.stopPropagation();
 
+    if (respondingInviteId === notification.id) {
+      return;
+    }
+
+    setRespondingInviteId(notification.id);
+
     try {
       const { data: session } = await supabase.auth.getSession();
       const currentUserId = session.session?.user?.id;
       if (!currentUserId) {
         toast.error('Please sign in to respond to invites');
         return;
-      }
-
-      let playlistTitle = 'this playlist';
-      if (notification.playlistId) {
-        const { data: legacyPlaylistRow } = await supabase
-          .from('playlists')
-          .select('name')
-          .eq('id', notification.playlistId)
-          .maybeSingle();
-
-        if (legacyPlaylistRow?.name) {
-          playlistTitle = legacyPlaylistRow.name;
-        } else {
-          const { data: playlistRowByTitle, error: titleLookupError } = await supabase
-            .from('collaborative_playlists')
-            .select('title')
-            .eq('id', notification.playlistId)
-            .maybeSingle();
-
-          if (!titleLookupError && playlistRowByTitle?.title) {
-            playlistTitle = playlistRowByTitle.title;
-          } else if (!isPolicyRecursionError(titleLookupError)) {
-            const { data: playlistRowByName } = await supabase
-              .from('collaborative_playlists')
-              .select('name')
-              .eq('id', notification.playlistId)
-              .maybeSingle();
-            if (playlistRowByName?.name) {
-              playlistTitle = playlistRowByName.name;
-            }
-          }
-        }
       }
 
       if (decision === 'accept') {
@@ -98,14 +95,25 @@ export default function NotificationsPanel() {
 
       await respondToPlaylistInviteRpc(notification.id, decision);
 
+      // Optimistically remove invite notification from panel state.
+      await deleteNotification(notification.id);
+
       toast.success(decision === 'accept' ? 'Joined playlist' : 'Invite declined');
     } catch (error) {
       console.error('Failed to respond to playlist invite:', error);
       if (isPolicyRecursionError(error)) {
         toast.error('Invite action blocked by DB policy recursion. Apply migration 021_fix_collab_policy_recursion.sql.');
+      } else if (isMissingCollaborativePlaylistError(error)) {
+        toast.error('Invite points to a legacy playlist row. Apply migration 023_fix_invite_rpc_missing_collab_playlist.sql and retry.');
+      } else if (isInviteConflictError(error)) {
+        // Idempotent recovery: invite may already be handled in another tab/session.
+        await deleteNotification(notification.id);
+        toast.success(decision === 'accept' ? 'Invite was already accepted' : 'Invite was already resolved');
       } else {
         toast.error('Could not process invite response');
       }
+    } finally {
+      setRespondingInviteId((prev) => (prev === notification.id ? null : prev));
     }
   };
 
@@ -311,6 +319,7 @@ export default function NotificationsPanel() {
                           <Button
                             size="sm"
                             className="h-7 text-xs"
+                            disabled={respondingInviteId === notification.id}
                             onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
                               respondToPlaylistInvite(notification, 'accept', e)
                             }
@@ -321,6 +330,7 @@ export default function NotificationsPanel() {
                             size="sm"
                             variant="outline"
                             className="h-7 text-xs"
+                            disabled={respondingInviteId === notification.id}
                             onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
                               respondToPlaylistInvite(notification, 'decline', e)
                             }
