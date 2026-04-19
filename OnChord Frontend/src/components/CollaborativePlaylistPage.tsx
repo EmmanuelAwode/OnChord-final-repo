@@ -6,7 +6,7 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Tabs, TabsContent } from "./ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
-import { UserPlus, Share2, Music, Clock, Sparkles, Search, Plus, Loader2, Trash2, Send, Camera } from "lucide-react";
+import { UserPlus, UserMinus, Share2, Music, Clock, Sparkles, Search, Plus, Loader2, Trash2, Send, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { BackButton } from "./BackButton";
 import { useProfile } from "../lib/useProfile";
@@ -57,6 +57,12 @@ function isUndefinedColumnError(error: any): boolean {
     message.includes("column") && message.includes("does not exist") ||
     message.includes("schema cache")
   );
+}
+
+function isMissingRpcError(error: any): boolean {
+  if (!error) return false;
+  const message = String(error.message || "").toLowerCase();
+  return error.code === "PGRST202" || error.status === 404 || message.includes("schema cache");
 }
 
 function isMissingLegacyPlaylistFkError(error: any): boolean {
@@ -161,6 +167,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const { profile } = useProfile();
   const [inviteResponseLoading, setInviteResponseLoading] = useState(false);
   const [hasAcceptedInvite, setHasAcceptedInvite] = useState(false);
+  const [resolvedPendingInvite, setResolvedPendingInvite] = useState<CollaborativePlaylistPageProps["pendingInvite"] | null>(null);
   const playlistFromStore = playlists.find(p => p.id === playlistId) || playlists[0];
   const playlist = playlistFromStore || (
     pendingInvite?.playlistId === playlistId
@@ -183,9 +190,12 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const [inviteSearchQuery, setInviteSearchQuery] = useState("");
   const [inviteFriends, setInviteFriends] = useState<Array<{ id: string; name: string; avatar: string }>>([]);
   const [selectedInvitees, setSelectedInvitees] = useState<string[]>([]);
+  const [currentCollaboratorIds, setCurrentCollaboratorIds] = useState<string[]>([]);
   const [isLoadingInviteFriends, setIsLoadingInviteFriends] = useState(false);
   const [isSendingInvites, setIsSendingInvites] = useState(false);
   const [isDeletingPlaylist, setIsDeletingPlaylist] = useState(false);
+  const [isLeavingPlaylist, setIsLeavingPlaylist] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [newMood, setNewMood] = useState("");
   const [tracks, setTracks] = useState<PlaylistTrack[]>((playlist?.tracks || []) as PlaylistTrack[]);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
@@ -199,8 +209,131 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   const creatorId = String(playlist?.creatorId || playlist?.creator_id || playlist?.created_by || "");
   const isCurrentUserContributor = !!currentUserId && !!playlist?.contributors?.some((c: any) => c.id === currentUserId);
   const isPlaylistCreator = !!currentUserId && !!creatorId && currentUserId === creatorId;
-  const isPendingInvite = !!pendingInvite && pendingInvite.playlistId === (playlist?.id || playlistId) && !isCurrentUserContributor && !hasAcceptedInvite;
+  const creatorContributor = playlist?.contributors?.find((contributor: any) => contributor.id === creatorId);
+  const creatorLabel = playlist?.creatorName || creatorContributor?.name || (isPlaylistCreator ? "You" : "Unknown creator");
+  const effectivePendingInvite = pendingInvite?.notificationId ? pendingInvite : resolvedPendingInvite;
+  const isPendingInvite =
+    !!effectivePendingInvite &&
+    effectivePendingInvite.playlistId === (playlist?.id || playlistId) &&
+    !isCurrentUserContributor &&
+    !hasAcceptedInvite;
   const canModifyTracks = !!currentUserId && (isCurrentUserContributor || hasAcceptedInvite);
+
+  useEffect(() => {
+    const targetPlaylistId = playlist?.id || playlistId;
+    if (!targetPlaylistId || !currentUserId || pendingInvite?.notificationId) {
+      return;
+    }
+
+    let active = true;
+
+    async function loadPendingInviteForPlaylist() {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, playlist_id, title")
+        .eq("user_id", currentUserId)
+        .eq("type", "playlist_invite")
+        .eq("playlist_id", targetPlaylistId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (error) {
+        console.error("Failed to resolve pending invite for playlist:", error);
+        setResolvedPendingInvite(null);
+        return;
+      }
+
+      if (!data) {
+        setResolvedPendingInvite(null);
+        return;
+      }
+
+      setResolvedPendingInvite({
+        playlistId: String(data.playlist_id || targetPlaylistId),
+        notificationId: String(data.id || ""),
+        title: data.title || undefined,
+      });
+    }
+
+    loadPendingInviteForPlaylist();
+
+    return () => {
+      active = false;
+    };
+  }, [playlist?.id, playlistId, currentUserId, pendingInvite?.notificationId]);
+
+  const refreshPlaylistMetadata = async () => {
+    const targetPlaylistId = playlist?.id || playlistId;
+    if (!targetPlaylistId) return;
+
+    const [modernPlaylistRes, legacyPlaylistRes] = await Promise.all([
+      supabase.from("collaborative_playlists").select("*").eq("id", targetPlaylistId).maybeSingle(),
+      supabase.from("playlists").select("*").eq("id", targetPlaylistId).maybeSingle(),
+    ]);
+
+    const modernPlaylist = modernPlaylistRes.data as any;
+    const legacyPlaylist = legacyPlaylistRes.data as any;
+
+    const canonicalCover =
+      modernPlaylist?.cover_image ||
+      modernPlaylist?.cover_url ||
+      legacyPlaylist?.cover_image ||
+      legacyPlaylist?.cover_url ||
+      playlist?.cover;
+    const canonicalTitle = modernPlaylist?.name || modernPlaylist?.title || legacyPlaylist?.name || legacyPlaylist?.title || playlist?.title;
+    const canonicalDescription = modernPlaylist?.description || legacyPlaylist?.description || playlist?.description;
+
+    setPlaylists((prev) =>
+      prev.map((p: any) =>
+        p.id === targetPlaylistId
+          ? {
+              ...p,
+              title: canonicalTitle || p.title,
+              description: canonicalDescription || p.description,
+              cover: canonicalCover || p.cover,
+              creatorId: String(modernPlaylist?.creator_id || modernPlaylist?.created_by || legacyPlaylist?.creator_id || p.creatorId || p.created_by || ""),
+              moods: p.moods,
+              lastUpdated: "Just now",
+            }
+          : p
+      )
+    );
+  };
+
+  useEffect(() => {
+    if (!playlist?.id) {
+      return;
+    }
+
+    let active = true;
+
+    const playlistChannel = supabase
+      .channel(`collab_playlist_meta_${playlist.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "collaborative_playlists", filter: `id=eq.${playlist.id}` },
+        () => {
+          if (active) {
+            refreshPlaylistMetadata().catch((error) => {
+              console.error("Failed to refresh collaborative playlist metadata:", error);
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    refreshPlaylistMetadata().catch((error) => {
+      console.error("Failed to load collaborative playlist metadata:", error);
+    });
+
+    return () => {
+      active = false;
+      supabase.removeChannel(playlistChannel);
+    };
+  }, [playlist?.id]);
 
   useEffect(() => {
     let active = true;
@@ -362,8 +495,36 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     async function loadInviteCandidates() {
       setIsLoadingInviteFriends(true);
       try {
-        const followingIds = await getMutualFollows();
+        const [followingIds, collabRowsRes, legacyPlaylistRes] = await Promise.all([
+          getMutualFollows(),
+          playlist?.id
+            ? supabase.from("playlist_collaborators").select("user_id").eq("playlist_id", playlist.id)
+            : Promise.resolve({ data: null, error: null } as any),
+          playlist?.id
+            ? supabase.from("playlists").select("collaborators").eq("id", playlist.id).maybeSingle()
+            : Promise.resolve({ data: null, error: null } as any),
+        ]);
         if (!active) return;
+
+        const liveCollaboratorIds = new Set<string>();
+        if (!collabRowsRes.error && Array.isArray(collabRowsRes.data)) {
+          for (const row of collabRowsRes.data as any[]) {
+            if (row?.user_id) {
+              liveCollaboratorIds.add(String(row.user_id));
+            }
+          }
+        }
+        if (Array.isArray(legacyPlaylistRes.data?.collaborators)) {
+          for (const collaboratorId of legacyPlaylistRes.data.collaborators) {
+            if (collaboratorId) {
+              liveCollaboratorIds.add(String(collaboratorId));
+            }
+          }
+        }
+        if (playlist?.creatorId || playlist?.creator_id || playlist?.created_by) {
+          liveCollaboratorIds.add(String(playlist.creatorId || playlist.creator_id || playlist.created_by));
+        }
+        setCurrentCollaboratorIds(Array.from(liveCollaboratorIds));
 
         if (followingIds.length === 0) {
           setInviteFriends([]);
@@ -396,7 +557,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
   }, [showInviteModal]);
 
   const handleInviteDecision = async (decision: "accept" | "decline") => {
-    if (!pendingInvite?.notificationId) {
+    if (!effectivePendingInvite?.notificationId) {
       toast.error("Invite details are missing");
       return;
     }
@@ -404,8 +565,10 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     setInviteResponseLoading(true);
     try {
       if (decision === "accept") {
-        await respondToPlaylistInvite(pendingInvite.notificationId, "accept");
+        await respondToPlaylistInvite(effectivePendingInvite.notificationId, "accept");
+        await refreshPlaylistMetadata();
         setHasAcceptedInvite(true);
+        setResolvedPendingInvite(null);
         setPlaylists((prev) =>
           prev.map((p: any) =>
             p.id === (playlist?.id || playlistId)
@@ -427,7 +590,8 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
         );
         toast.success("Invite accepted");
       } else {
-        await respondToPlaylistInvite(pendingInvite.notificationId, "decline");
+        await respondToPlaylistInvite(effectivePendingInvite.notificationId, "decline");
+        setResolvedPendingInvite(null);
         toast.success("Invite declined");
         onInviteResolved?.();
         onNavigate?.("playlist");
@@ -766,7 +930,9 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       return;
     }
 
-    const existingContributorIds = new Set((playlist?.contributors || []).map((c: any) => c.id));
+    const existingContributorIds = new Set(
+      (currentCollaboratorIds.length > 0 ? currentCollaboratorIds : (playlist?.contributors || []).map((c: any) => c.id)).map((id: string) => String(id))
+    );
     const filteredInvitees = selectedInvitees.filter((id) => !existingContributorIds.has(id));
 
     if (filteredInvitees.length === 0) {
@@ -801,6 +967,18 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
 
       const inviterName = profile?.display_name || profile?.username || "A user";
       const inviterAvatar = profile?.avatar_url || null;
+
+      const { error: staleInviteCleanupError } = await supabase
+        .from("notifications")
+        .delete()
+        .eq("type", "playlist_invite")
+        .eq("playlist_id", playlist.id)
+        .eq("action_user_id", currentUserId)
+        .in("user_id", eligibleInvitees);
+
+      if (staleInviteCleanupError) {
+        throw staleInviteCleanupError;
+      }
 
       const inviteRows = eligibleInvitees.map((inviteeId) => ({
         user_id: inviteeId,
@@ -837,6 +1015,71 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       toast.error("Failed to send invites. Please try again.");
     } finally {
       setIsSendingInvites(false);
+    }
+  };
+
+  const handleLeavePlaylist = async () => {
+    if (!playlist?.id || !currentUserId || !isCurrentUserContributor || isPlaylistCreator) {
+      return;
+    }
+
+    setIsLeavingPlaylist(true);
+    try {
+      let { error } = await supabase.rpc("leave_collaborative_playlist", {
+        p_playlist_id: playlist.id,
+      });
+
+      if (error && (isMissingRpcError(error) || isUndefinedColumnError(error))) {
+        // Compatibility fallback when migration 029 hasn't been applied yet.
+        const [collaboratorDeleteRes, contributorDeleteRes] = await Promise.all([
+          supabase
+            .from("playlist_collaborators")
+            .delete()
+            .eq("playlist_id", playlist.id)
+            .eq("user_id", currentUserId),
+          supabase
+            .from("playlist_contributors")
+            .delete()
+            .eq("playlist_id", playlist.id)
+            .eq("user_id", currentUserId),
+        ]);
+
+        if (collaboratorDeleteRes.error && !isPermissionDeniedError(collaboratorDeleteRes.error)) {
+          throw collaboratorDeleteRes.error;
+        }
+        if (contributorDeleteRes.error && !isPermissionDeniedError(contributorDeleteRes.error)) {
+          throw contributorDeleteRes.error;
+        }
+
+        error = null;
+      }
+
+      if (error) {
+        throw error;
+      }
+
+      setPlaylists((prev) =>
+        prev.map((p: any) =>
+          p.id === playlist.id
+            ? {
+                ...p,
+                contributors: (p.contributors || []).filter((contributor: any) => contributor.id !== currentUserId),
+              }
+            : p
+        )
+      );
+      setShowLeaveConfirm(false);
+      toast.success("You left the playlist");
+      if (onBack) {
+        onBack();
+      } else {
+        onNavigate?.("your-space-collab");
+      }
+    } catch (error) {
+      console.error("Failed to leave collaborative playlist:", error);
+      toast.error("Could not leave playlist right now");
+    } finally {
+      setIsLeavingPlaylist(false);
     }
   };
 
@@ -910,6 +1153,36 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
     <div className="space-y-6 animate-fade-in">
       {/* Back Button */}
       <BackButton onClick={onBack || (() => onNavigate?.("your-space-collab"))} label={canGoBack ? "Back" : "Back to Collaborative Playlists"} />
+
+      {isPendingInvite && (
+        <Card className="p-4 border-primary/40 bg-primary/5">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <p className="text-sm text-foreground">You have a pending invitation to this playlist.</p>
+              <p className="text-xs text-muted-foreground">Accept to start collaborating or decline to remove the invite.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="border-border"
+                disabled={inviteResponseLoading}
+                onClick={() => handleInviteDecision("decline")}
+              >
+                {inviteResponseLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Decline
+              </Button>
+              <Button
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                disabled={inviteResponseLoading}
+                onClick={() => handleInviteDecision("accept")}
+              >
+                {inviteResponseLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Accept Invite
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
       
       {/* Playlist Header */}
       <Card className="p-8 bg-card border-border shadow-lg">
@@ -947,6 +1220,12 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
               </Badge>
               <h1 className="text-3xl text-foreground mb-2">{playlist.title}</h1>
               <p className="text-muted-foreground">{playlist.description}</p>
+                <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Badge variant="outline" className="border-primary/40 text-primary">
+                    Creator: {creatorLabel}
+                  </Badge>
+                  <span>Only the creator can add collaborators.</span>
+                </div>
             </div>
 
             {/* Moods */}
@@ -1013,7 +1292,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                     <UserPlus className="w-4 h-4 text-primary" />
                   </button>
                 ) : (
-                  <div className="text-xs text-muted-foreground px-2">Only the creator can add people</div>
+                  <div className="text-xs text-muted-foreground px-2">Creator only</div>
                 )}
               </div>
             </div>
@@ -1029,8 +1308,14 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                   Invite Friends
                 </Button>
               ) : (
-                <Button variant="outline" className="border-border text-muted-foreground" disabled>
-                  Only creator can invite
+                <Button
+                  variant="outline"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                  onClick={() => setShowLeaveConfirm(true)}
+                  disabled={!isCurrentUserContributor || isLeavingPlaylist}
+                >
+                  {isLeavingPlaylist ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserMinus className="w-4 h-4 mr-2" />}
+                  Leave Playlist
                 </Button>
               )}
               <Button variant="outline" className="border-border">
@@ -1184,9 +1469,9 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
       <Dialog open={showInviteModal} onOpenChange={setShowInviteModal}>
         <DialogContent className="bg-card border-border max-w-xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-foreground">Invite Friends</DialogTitle>
+            <DialogTitle className="text-foreground">Invite Collaborators</DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              Invite users who follow you back to collaborate on this playlist
+              Only the playlist creator can invite collaborators who follow you back.
             </DialogDescription>
           </DialogHeader>
 
@@ -1213,7 +1498,7 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
               )}
 
               {!isLoadingInviteFriends && filteredInviteFriends.map((friend) => {
-                const isAlreadyContributor = (playlist?.contributors || []).some((c: any) => c.id === friend.id);
+                const isAlreadyContributor = (currentCollaboratorIds.length > 0 ? currentCollaboratorIds : (playlist?.contributors || []).map((c: any) => c.id)).includes(friend.id);
                 const isSelected = selectedInvitees.includes(friend.id);
 
                 return (
@@ -1397,6 +1682,26 @@ export function CollaborativePlaylistPage({ onNavigate, playlistId, playlists, s
                 </div>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm}>
+        <DialogContent className="bg-card border-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">Leave this playlist?</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              You will be removed from the collaborator list and the creator will be notified.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setShowLeaveConfirm(false)} disabled={isLeavingPlaylist}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleLeavePlaylist} disabled={isLeavingPlaylist}>
+              {isLeavingPlaylist ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Leave Playlist
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

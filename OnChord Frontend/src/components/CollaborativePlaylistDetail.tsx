@@ -28,6 +28,8 @@ import { toast } from "sonner";
 import { searchAlbums } from "../lib/api/musicSearch";
 import { useProfile } from "../lib/useProfile";
 import { supabase } from "../lib/supabaseClient";
+import { getMutualFollows } from "../lib/api/follows";
+import { getProfiles } from "../lib/api/profiles";
 
 interface Album {
   id: string;
@@ -74,7 +76,7 @@ interface CollaborativePlaylistDetailProps {
   onOpenTrack?: (trackData: any) => void;
   onAddTrack?: (track: Track) => void;
   onRemoveTrack?: (trackId: string) => void;
-  onUpdatePlaylist?: (updates: Partial<CollaborativePlaylistDetailProps['playlist']>) => void;
+  onUpdatePlaylist?: (updates: Partial<CollaborativePlaylistDetailProps['playlist']>) => Promise<boolean> | boolean;
 }
 
 export function CollaborativePlaylistDetail({
@@ -117,8 +119,28 @@ export function CollaborativePlaylistDetail({
   const [newMood, setNewMood] = useState("");
   const [editedContributors, setEditedContributors] = useState<Contributor[]>(safePlaylist.contributors);
   const [showAddContributor, setShowAddContributor] = useState(false);
+  const [availableContributors, setAvailableContributors] = useState<Contributor[]>([]);
+  const [isLoadingContributors, setIsLoadingContributors] = useState(false);
   const [searchAlbumResults, setSearchAlbumResults] = useState<Album[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  const contributorsEqual = (a: Contributor[], b: Contributor[]) => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i]?.id !== b[i]?.id || a[i]?.name !== b[i]?.name || (a[i]?.avatar || "") !== (b[i]?.avatar || "")) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const moodsEqual = (a: string[], b: string[]) => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  };
 
   useEffect(() => {
     setTracks(initialTracks || []);
@@ -129,11 +151,58 @@ export function CollaborativePlaylistDetail({
       return;
     }
 
-    setEditedTitle(safePlaylist.title);
-    setEditedDescription(safePlaylist.description);
-    setEditedMoods(safePlaylist.moods);
-    setEditedContributors(safePlaylist.contributors);
-  }, [safePlaylist.title, safePlaylist.description, safePlaylist.moods, safePlaylist.contributors, isEditMode]);
+    setEditedTitle((prev) => (prev === safePlaylist.title ? prev : safePlaylist.title));
+    setEditedDescription((prev) => (prev === safePlaylist.description ? prev : safePlaylist.description));
+    setEditedMoods((prev) => (moodsEqual(prev, safePlaylist.moods) ? prev : safePlaylist.moods));
+    setEditedContributors((prev) => (contributorsEqual(prev, safePlaylist.contributors) ? prev : safePlaylist.contributors));
+  }, [safePlaylist.id, safePlaylist.title, safePlaylist.description, safePlaylist.lastUpdated, isEditMode]);
+
+  useEffect(() => {
+    if (!isCreator || !isEditMode || !showAddContributor) {
+      return;
+    }
+
+    let active = true;
+
+    async function loadMutualContributors() {
+      setIsLoadingContributors(true);
+      try {
+        const mutualIds = await getMutualFollows(500, 0);
+        if (!active) return;
+
+        if (mutualIds.length === 0) {
+          setAvailableContributors([]);
+          return;
+        }
+
+        const profiles = await getProfiles(mutualIds);
+        if (!active) return;
+
+        setAvailableContributors(
+          profiles.map((p) => ({
+            id: p.id,
+            name: p.display_name || p.username || "Music Lover",
+            avatar: p.avatar_url || undefined,
+          }))
+        );
+      } catch (error) {
+        console.error("Failed to load mutual follow contributors:", error);
+        if (active) {
+          setAvailableContributors([]);
+        }
+      } finally {
+        if (active) {
+          setIsLoadingContributors(false);
+        }
+      }
+    }
+
+    loadMutualContributors();
+
+    return () => {
+      active = false;
+    };
+  }, [isCreator, isEditMode, showAddContributor]);
 
   const handleCoverUpdate = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -241,10 +310,12 @@ export function CollaborativePlaylistDetail({
     setSearchQuery("");
   };
 
-  const handleSaveDescription = () => {
+  const handleSaveDescription = async () => {
+    const result = await onUpdatePlaylist?.({ description: editedDescription });
+    if (result === false) return;
+
     setIsEditMode(false);
     toast.success("Description updated");
-    onUpdatePlaylist?.({ description: editedDescription });
   };
 
   const handleAddMood = () => {
@@ -271,6 +342,11 @@ export function CollaborativePlaylistDetail({
   };
 
   const handleRemoveContributor = (contributorId: string) => {
+    if (!isCreator) {
+      toast.error("Only the creator can remove contributors");
+      return;
+    }
+
     if (contributorId === creatorId) {
       toast.error("The creator cannot be removed");
       return;
@@ -279,13 +355,18 @@ export function CollaborativePlaylistDetail({
     setEditedContributors(prev => prev.filter(c => c.id !== contributorId));
   };
 
-  const handleSaveAllChanges = () => {
-    onUpdatePlaylist?.({
+  const handleSaveAllChanges = async () => {
+    const result = await onUpdatePlaylist?.({
       title: editedTitle,
       description: editedDescription,
       moods: editedMoods,
       contributors: editedContributors,
     });
+
+    if (result === false) {
+      return;
+    }
+
     setIsEditMode(false);
     toast.success("Playlist updated successfully!");
     window.setTimeout(() => {
@@ -314,8 +395,9 @@ export function CollaborativePlaylistDetail({
     setIsEditMode(initialMode === "edit");
   }, [initialMode]);
 
-  // Placeholder contributors for adding - in a real app would fetch from following list
-  const mockAvailableContributors: Contributor[] = [];
+  const selectableContributors = availableContributors.filter(
+    (candidate) => !editedContributors.some((existing) => existing.id === candidate.id)
+  );
 
   // Use search results from debounced search
   const filteredAlbums = searchAlbumResults;
@@ -385,29 +467,11 @@ export function CollaborativePlaylistDetail({
           </div>
 
           <div className="grid md:grid-cols-[96px_1fr] gap-5 items-start">
-            <div className="relative w-24 h-24 md:w-24 md:h-24">
-              <img
-                src={safePlaylist.cover}
-                alt={safePlaylist.title}
-                className="w-24 h-24 md:w-24 md:h-24 object-cover rounded-lg border border-border shadow-sm"
-              />
-              <input
-                ref={coverInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleCoverUpdate}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                className="absolute -bottom-2 -right-2 bg-background/95 border-border h-8 px-2"
-                onClick={() => coverInputRef.current?.click()}
-              >
-                <Camera className="w-3.5 h-3.5 mr-1" />
-                Cover
-              </Button>
-            </div>
+            <img
+              src={safePlaylist.cover}
+              alt={safePlaylist.title}
+              className="w-24 h-24 md:w-24 md:h-24 object-cover rounded-lg border border-border shadow-sm"
+            />
             <div className="space-y-3 min-w-0">
               <div>
                 <h3 className="text-2xl text-foreground mb-1 truncate">{safePlaylist.title}</h3>
@@ -444,6 +508,36 @@ export function CollaborativePlaylistDetail({
           </div>
 
           <div className="space-y-6">
+            <div>
+              <label className="text-sm text-foreground mb-2 block">Playlist Cover</label>
+              <div className="flex items-center gap-4">
+                <img
+                  src={safePlaylist.cover}
+                  alt={safePlaylist.title}
+                  className="w-20 h-20 rounded-lg object-cover border border-border shadow-sm"
+                />
+                <div className="space-y-2">
+                  <input
+                    ref={coverInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleCoverUpdate}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-border hover:border-primary hover:text-primary"
+                    onClick={() => coverInputRef.current?.click()}
+                  >
+                    <Camera className="w-4 h-4 mr-2" />
+                    Change Cover
+                  </Button>
+                  <p className="text-xs text-muted-foreground">Any collaborator can update the playlist picture from edit mode.</p>
+                </div>
+              </div>
+            </div>
+
             <div>
               <label className="text-sm text-foreground mb-2 block">Playlist Title</label>
               <Input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="bg-background border-border text-foreground" placeholder="Enter playlist title..." />
@@ -506,7 +600,7 @@ export function CollaborativePlaylistDetail({
                           <p className="text-xs text-muted-foreground">{contributor.id === creatorId ? "Creator" : "Contributor"}</p>
                         </div>
                       </div>
-                      {contributor.id !== creatorId && (
+                      {isCreator && contributor.id !== creatorId && (
                         <Button size="sm" variant="ghost" onClick={() => handleRemoveContributor(contributor.id)} className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive transition-all">
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -524,7 +618,15 @@ export function CollaborativePlaylistDetail({
                       </Button>
                     </div>
                     <div className="space-y-2">
-                      {mockAvailableContributors.filter(c => !editedContributors.some(ec => ec.id === c.id)).map((contributor) => (
+                      {isLoadingContributors && (
+                        <div className="text-xs text-muted-foreground">Loading mutual followers...</div>
+                      )}
+
+                      {!isLoadingContributors && selectableContributors.length === 0 && (
+                        <div className="text-xs text-muted-foreground">No additional mutual followers available to invite.</div>
+                      )}
+
+                      {!isLoadingContributors && selectableContributors.map((contributor) => (
                         <button key={contributor.id} onClick={() => { handleAddContributor(contributor); toast.success(`Added ${contributor.name} as contributor`); }} className="w-full flex items-center gap-3 p-3 rounded-lg bg-background hover:bg-muted/30 border border-border hover:border-primary/50 transition-colors">
                           {contributor.avatar ? (
                             <img src={contributor.avatar} alt={contributor.name} className="w-10 h-10 rounded-full object-cover" />

@@ -93,11 +93,13 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         cover: string;
         updatedAtRaw: string | null;
         creatorId: string | null;
+        creatorName: string | null;
         moods: string[];
       };
 
       const basePlaylists = new Map<string, BasePlaylist>();
       const contributorIdsByPlaylist = new Map<string, Set<string>>();
+      const creatorIdsByPlaylist = new Map<string, string>();
 
       const ensureContributorSet = (playlistId: string) => {
         const existing = contributorIdsByPlaylist.get(playlistId);
@@ -118,6 +120,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
           cover: fallback?.cover || `https://api.dicebear.com/7.x/shapes/svg?seed=${playlistId}`,
           updatedAtRaw: fallback?.updatedAtRaw || null,
           creatorId: fallback?.creatorId || null,
+          creatorName: fallback?.creatorName || null,
           moods: Array.isArray((fallback as any)?.moods) ? (fallback as any).moods : [],
         };
         basePlaylists.set(playlistId, created);
@@ -151,11 +154,14 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${id}`,
             updatedAtRaw: row.updated_at || row.created_at || null,
             creatorId: row.creator_id || row.created_by || null,
+            creatorName: null,
             moods: Array.isArray(row.moods) ? row.moods : [],
           });
 
           if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
           if (row.created_by) ensureContributorSet(id).add(String(row.created_by));
+          if (row.creator_id) creatorIdsByPlaylist.set(id, String(row.creator_id));
+          if (row.created_by) creatorIdsByPlaylist.set(id, String(row.created_by));
         }
       } else if (modernPlaylistsRes.error) {
         warnOnceForPolicyRecursion(modernPlaylistsRes.error);
@@ -172,6 +178,9 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
 
           ensureBasePlaylist(playlistId);
           ensureContributorSet(playlistId).add(userId);
+          if (row.role === "owner") {
+            creatorIdsByPlaylist.set(playlistId, userId);
+          }
         }
       } else if (modernCollaboratorsRes.error) {
         warnOnceForPolicyRecursion(modernCollaboratorsRes.error);
@@ -191,10 +200,13 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             cover: row.cover_url || row.cover_image || `https://api.dicebear.com/7.x/shapes/svg?seed=${id}`,
             updatedAtRaw: row.updated_at || row.created_at || null,
             creatorId: row.creator_id || row.created_by || null,
+            creatorName: null,
             moods: Array.isArray(row.moods) ? row.moods : [],
           });
 
           if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
+          if (row.creator_id) creatorIdsByPlaylist.set(id, String(row.creator_id));
+          if (row.created_by) creatorIdsByPlaylist.set(id, String(row.created_by));
           if (Array.isArray(row.collaborators)) {
             for (const collaboratorId of row.collaborators) {
               if (collaboratorId) ensureContributorSet(id).add(String(collaboratorId));
@@ -282,6 +294,7 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
         .map((id) => {
           const base = basePlaylists.get(id)!;
           const contributorIds = Array.from(contributorIdsByPlaylist.get(id) || new Set<string>());
+          const creatorId = creatorIdsByPlaylist.get(id) || base.creatorId || null;
           const contributors = contributorIds.map((userId) => {
             const contributorProfile = profilesById.get(userId);
             return {
@@ -303,7 +316,11 @@ export function CollaborativePlaylistsHub({ onNavigate, onOpenPlaylist, playlist
             title: base.title,
             description: base.description,
             cover: base.cover,
-            creatorId: base.creatorId,
+            creatorId,
+            creatorName:
+              creatorId && profilesById.get(creatorId)
+                ? profilesById.get(creatorId).display_name || profilesById.get(creatorId).username || "Creator"
+                : base.creatorName || null,
             trackCount: tracksByPlaylist.get(id) || 0,
             pendingInviteCount: pendingByPlaylist.get(id) || 0,
             contributors:

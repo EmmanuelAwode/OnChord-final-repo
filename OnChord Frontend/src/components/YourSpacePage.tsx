@@ -19,6 +19,7 @@ import { useTopArtists } from "../lib/useSpotify";
 import { useProfile } from "../lib/useProfile";
 import { getFollowerCount, getFollowingCount, getFollowers, getFollowing } from "../lib/api/follows";
 import { getProfiles, type Profile } from "../lib/api/profiles";
+import { respondToPlaylistInvite } from "../lib/api/collaborativeInvites";
 import { toast } from "sonner";
 import { AddToListDialog } from "./AddToListDialog";
 import { supabase } from "../lib/supabaseClient";
@@ -117,6 +118,8 @@ export function YourSpacePage({
   const [selectedPlaylistMode, setSelectedPlaylistMode] = useState<"view" | "edit">("view");
   const [playlistTracksState, setPlaylistTracksState] = useState<Record<string, any[]>>({});
   const [loadedCollaborativePlaylists, setLoadedCollaborativePlaylists] = useState<any[]>([]);
+  const [pendingPlaylistInvites, setPendingPlaylistInvites] = useState<Array<{ notificationId: string; playlistId: string; title: string; message: string; createdAt: string }>>([]);
+  const [pendingInviteActionId, setPendingInviteActionId] = useState<string | null>(null);
 
   // Keep the collab tab functional even when the parent app has not supplied playlist data yet.
   // Shared collaborative playlists state comes from App when available; otherwise use a local fallback load.
@@ -129,6 +132,7 @@ export function YourSpacePage({
     moods: Array.isArray(playlist?.moods) ? playlist.moods : [],
     contributors: Array.isArray(playlist?.contributors) ? playlist.contributors : [],
     creatorId: String(playlist?.creatorId || playlist?.creator_id || playlist?.created_by || ""),
+    creatorName: playlist?.creatorName || null,
     trackCount: Number(playlist?.trackCount || playlist?.track_count || playlist?.tracks_count || 0),
     lastUpdated: playlist?.lastUpdated || playlist?.updated_at || "Just now",
   });
@@ -144,6 +148,134 @@ export function YourSpacePage({
 
     setLoadedCollaborativePlaylists((prev) => applyUpdate(prev));
   };
+
+  const refreshCollaborativePlaylistMetadata = async (playlistId: string) => {
+    if (!playlistId) return;
+
+    const [modernPlaylistRes, legacyPlaylistRes] = await Promise.all([
+      supabase
+        .from("collaborative_playlists")
+        .select("*")
+        .eq("id", playlistId)
+        .maybeSingle(),
+      supabase
+        .from("playlists")
+        .select("*")
+        .eq("id", playlistId)
+        .maybeSingle(),
+    ]);
+
+    const modernPlaylist = modernPlaylistRes.data;
+    const legacyPlaylist = legacyPlaylistRes.data;
+
+    const canonicalCover =
+      modernPlaylist?.cover_image ||
+      modernPlaylist?.cover_url ||
+      legacyPlaylist?.cover_image ||
+      legacyPlaylist?.cover_url;
+
+    const canonicalTitle = modernPlaylist?.name || modernPlaylist?.title || legacyPlaylist?.name || legacyPlaylist?.title;
+    const canonicalDescription = modernPlaylist?.description || legacyPlaylist?.description;
+
+    updateSharedCollaborativePlaylist(playlistId, (playlist) => ({
+      ...playlist,
+      title: canonicalTitle || playlist.title,
+      description: canonicalDescription || playlist.description,
+      cover: canonicalCover || playlist.cover,
+      creatorId: String(modernPlaylist?.creator_id || modernPlaylist?.created_by || legacyPlaylist?.creator_id || playlist.creatorId || playlist.created_by || ""),
+      moods: playlist.moods || [],
+      contributors: Array.isArray(legacyPlaylist?.collaborators)
+        ? playlist.contributors
+        : playlist.contributors,
+      lastUpdated: "Just now",
+    }));
+  };
+
+  useEffect(() => {
+    if (!selectedPlaylistId) return;
+
+    let active = true;
+
+    const playlistChannel = supabase
+      .channel(`yourspace_collab_playlist_meta_${selectedPlaylistId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "collaborative_playlists", filter: `id=eq.${selectedPlaylistId}` },
+        () => {
+          if (active) {
+            refreshCollaborativePlaylistMetadata(selectedPlaylistId).catch((error) => {
+              console.error("Failed to refresh collaborative playlist metadata in Your Space:", error);
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    refreshCollaborativePlaylistMetadata(selectedPlaylistId).catch((error) => {
+      console.error("Failed to load collaborative playlist metadata in Your Space:", error);
+    });
+
+    return () => {
+      active = false;
+      supabase.removeChannel(playlistChannel);
+    };
+  }, [selectedPlaylistId]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setPendingPlaylistInvites([]);
+      return;
+    }
+
+    let active = true;
+
+    async function loadPendingPlaylistInvites() {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, playlist_id, title, message, created_at")
+        .eq("user_id", profile.id)
+        .eq("type", "playlist_invite")
+        .order("created_at", { ascending: false });
+
+      if (!active) return;
+
+      if (error) {
+        console.error("Failed to load pending playlist invites:", error);
+        setPendingPlaylistInvites([]);
+        return;
+      }
+
+      const mapped = (data || [])
+        .map((row: any) => ({
+          notificationId: String(row.id || ""),
+          playlistId: String(row.playlist_id || ""),
+          title: row.title || "Playlist collaboration invite",
+          message: row.message || "You were invited to collaborate on a playlist.",
+          createdAt: row.created_at || "",
+        }))
+        .filter((invite) => invite.notificationId && invite.playlistId);
+
+      setPendingPlaylistInvites(mapped);
+    }
+
+    loadPendingPlaylistInvites();
+
+    const inviteChannel = supabase
+      .channel(`yourspace_pending_invites_${profile.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
+        () => {
+          loadPendingPlaylistInvites();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(inviteChannel);
+    };
+  }, [profile?.id]);
 
   const persistCollaborativePlaylistChanges = async (
     playlistId: string,
@@ -170,84 +302,235 @@ export function YourSpacePage({
       ])
     );
 
-    const modernPayload: Record<string, unknown> = { updated_at: now };
-    const legacyPayload: Record<string, unknown> = { updated_at: now, collaborators: contributorIds };
+    const buildPayload = (
+      titleKey: "name" | "title",
+      coverKey: "cover_image" | "cover_url",
+      includeMoods: boolean,
+      includeCollaborators: boolean
+    ) => {
+      const payload: Record<string, unknown> = { updated_at: now };
 
-    if (updates.title !== undefined) {
-      modernPayload.name = updates.title;
-      legacyPayload.name = updates.title;
-    }
-    if (updates.description !== undefined) {
-      modernPayload.description = updates.description;
-      legacyPayload.description = updates.description;
-    }
-    if (updates.cover !== undefined) {
-      modernPayload.cover_image = updates.cover;
-      legacyPayload.cover_image = updates.cover;
-    }
-    if (updates.moods !== undefined) {
-      modernPayload.moods = updates.moods;
-      legacyPayload.moods = updates.moods;
-    }
+      if (updates.title !== undefined) {
+        payload[titleKey] = updates.title;
+      }
+
+      if (updates.description !== undefined) {
+        payload.description = updates.description;
+      }
+
+      if (updates.cover !== undefined) {
+        payload[coverKey] = updates.cover;
+      }
+
+      if (includeMoods && updates.moods !== undefined) {
+        payload.moods = updates.moods;
+      }
+
+      if (includeCollaborators) {
+        payload.collaborators = contributorIds;
+      }
+
+      return payload;
+    };
 
     const updateAttempts = [
-      () => supabase.from("collaborative_playlists").update(modernPayload).eq("id", playlistId),
-      () => supabase.from("playlists").update(legacyPayload).eq("id", playlistId),
+      () => supabase.from("collaborative_playlists").update(buildPayload("name", "cover_image", true, false)).eq("id", playlistId),
+      () => supabase.from("collaborative_playlists").update(buildPayload("name", "cover_image", false, false)).eq("id", playlistId),
+      () => supabase.from("collaborative_playlists").update(buildPayload("title", "cover_url", true, false)).eq("id", playlistId),
+      () => supabase.from("collaborative_playlists").update(buildPayload("title", "cover_url", false, false)).eq("id", playlistId),
+      () => supabase.from("playlists").update(buildPayload("name", "cover_image", true, true)).eq("id", playlistId),
+      () => supabase.from("playlists").update(buildPayload("name", "cover_image", false, true)).eq("id", playlistId),
+      () => supabase.from("playlists").update(buildPayload("title", "cover_url", true, true)).eq("id", playlistId),
+      () => supabase.from("playlists").update(buildPayload("title", "cover_url", false, true)).eq("id", playlistId),
     ];
 
+    let savedMetadata = false;
     let lastError: any = null;
 
     for (const attempt of updateAttempts) {
       const { error } = await attempt();
       if (!error) {
+        savedMetadata = true;
         lastError = null;
-        continue;
+        break;
       }
 
       lastError = error;
     }
 
-    if (lastError) {
+    if (!savedMetadata && lastError) {
       throw lastError;
     }
 
     if (updates.contributors) {
       const currentPlaylist = collaborativePlaylists.find((playlist) => playlist.id === playlistId);
-      const previousContributorIds = Array.isArray(currentPlaylist?.contributors)
-        ? currentPlaylist.contributors.map((contributor: any) => String(contributor.id)).filter(Boolean)
-        : [];
+      const liveContributorIds = new Set<string>();
 
-      const contributorRows = contributorIds.map((userId) => ({
-        playlist_id: playlistId,
-        user_id: userId,
-        role: userId === profile.id ? "owner" : "contributor",
-      }));
+      try {
+        const [collaboratorRowsRes, legacyPlaylistRes] = await Promise.all([
+          supabase.from("playlist_collaborators").select("user_id").eq("playlist_id", playlistId),
+          supabase.from("playlists").select("collaborators").eq("id", playlistId).maybeSingle(),
+        ]);
 
-      const { error: collaboratorUpsertError } = await supabase
-        .from("playlist_collaborators")
-        .upsert(contributorRows, { onConflict: "playlist_id,user_id" });
+        if (!collaboratorRowsRes.error && Array.isArray(collaboratorRowsRes.data)) {
+          for (const row of collaboratorRowsRes.data as any[]) {
+            if (row?.user_id) {
+              liveContributorIds.add(String(row.user_id));
+            }
+          }
+        }
 
-      if (collaboratorUpsertError) {
-        console.warn("Failed to persist playlist_collaborators:", collaboratorUpsertError);
+        if (Array.isArray(legacyPlaylistRes.data?.collaborators)) {
+          for (const collaboratorId of legacyPlaylistRes.data.collaborators) {
+            if (collaboratorId) {
+              liveContributorIds.add(String(collaboratorId));
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to load live collaborative membership before save:", error);
       }
 
-      const { error: contributorUpsertError } = await supabase
-        .from("playlist_contributors")
-        .upsert(
-          contributorIds.map((userId) => ({ playlist_id: playlistId, user_id: userId })),
-          { onConflict: "playlist_id,user_id" }
-        );
+      const previousContributorIds =
+        liveContributorIds.size > 0
+          ? Array.from(liveContributorIds)
+          : Array.isArray(currentPlaylist?.contributors)
+            ? currentPlaylist.contributors.map((contributor: any) => String(contributor.id)).filter(Boolean)
+            : [];
 
-      if (contributorUpsertError) {
-        console.warn("Failed to persist playlist_contributors:", contributorUpsertError);
-      }
-
+      const addedContributorIds = contributorIds.filter((id) => !previousContributorIds.includes(id));
       const removedContributorIds = previousContributorIds.filter((id) => id !== creatorId && !contributorIds.includes(id));
+      const actorName = profile.display_name || profile.username || "A user";
+      const actorAvatar = profile.avatar_url || null;
+      const playlistTitle = updates.title || currentPlaylist?.title || "a playlist";
+      const inviteeIds = addedContributorIds.filter((id) => id !== creatorId && id !== profile.id);
+
+      if (addedContributorIds.length > 0) {
+        const collaboratorRows = addedContributorIds.map((userId) => ({
+          playlist_id: playlistId,
+          user_id: userId,
+          role: userId === creatorId ? "owner" : "contributor",
+        }));
+
+        const { error: collaboratorInsertError } = await supabase
+          .from("playlist_collaborators")
+          .upsert(collaboratorRows, { onConflict: "playlist_id,user_id", ignoreDuplicates: true });
+
+        if (collaboratorInsertError) {
+          throw collaboratorInsertError;
+        }
+
+        const { error: contributorInsertError } = await supabase
+          .from("playlist_contributors")
+          .upsert(
+            addedContributorIds.map((userId) => ({ playlist_id: playlistId, user_id: userId })),
+            { onConflict: "playlist_id,user_id", ignoreDuplicates: true }
+          );
+
+        if (contributorInsertError) {
+          throw contributorInsertError;
+        }
+
+        if (inviteeIds.length > 0) {
+          const { error: staleInviteCleanupError } = await supabase
+            .from("notifications")
+            .delete()
+            .eq("type", "playlist_invite")
+            .eq("playlist_id", playlistId)
+            .eq("action_user_id", profile.id)
+            .in("user_id", inviteeIds);
+
+          if (staleInviteCleanupError) {
+            throw staleInviteCleanupError;
+          }
+
+          const inviteRows = inviteeIds.map((inviteeId) => ({
+            user_id: inviteeId,
+            type: "playlist_invite",
+            title: "Playlist collaboration invite",
+            message: `${actorName} invited you to collaborate on \"${playlistTitle}\".`,
+            action_user_id: profile.id,
+            action_user_name: actorName,
+            action_user_avatar: actorAvatar,
+            playlist_id: playlistId,
+            is_read: false,
+          }));
+
+          const { error: inviteNotificationError } = await supabase.from("notifications").insert(inviteRows);
+
+          if (inviteNotificationError) {
+            throw inviteNotificationError;
+          }
+        }
+      }
 
       for (const userId of removedContributorIds) {
-        await supabase.from("playlist_collaborators").delete().eq("playlist_id", playlistId).eq("user_id", userId);
-        await supabase.from("playlist_contributors").delete().eq("playlist_id", playlistId).eq("user_id", userId);
+        const { error: collaboratorDeleteError } = await supabase
+          .from("playlist_collaborators")
+          .delete()
+          .eq("playlist_id", playlistId)
+          .eq("user_id", userId);
+
+        if (collaboratorDeleteError) {
+          throw collaboratorDeleteError;
+        }
+
+        const { error: contributorDeleteError } = await supabase
+          .from("playlist_contributors")
+          .delete()
+          .eq("playlist_id", playlistId)
+          .eq("user_id", userId);
+
+        if (contributorDeleteError) {
+          throw contributorDeleteError;
+        }
+
+        const { error: removalNotificationError } = await supabase.from("notifications").insert({
+          user_id: userId,
+          type: "playlist_add",
+          title: "Removed from playlist",
+          message: `${actorName} removed you from \"${playlistTitle}\".`,
+          action_user_id: profile.id,
+          action_user_name: actorName,
+          action_user_avatar: actorAvatar,
+          playlist_id: playlistId,
+          is_read: false,
+        });
+
+        if (removalNotificationError) {
+          throw removalNotificationError;
+        }
       }
+    }
+  };
+
+  const handlePendingInviteDecision = async (
+    invite: { notificationId: string; playlistId: string; title: string },
+    decision: "accept" | "decline"
+  ) => {
+    if (!invite.notificationId) {
+      toast.error("Invite details are missing");
+      return;
+    }
+
+    setPendingInviteActionId(invite.notificationId);
+
+    try {
+      await respondToPlaylistInvite(invite.notificationId, decision);
+      setPendingPlaylistInvites((prev) => prev.filter((item) => item.notificationId !== invite.notificationId));
+
+      if (decision === "accept") {
+        toast.success("Invite accepted");
+        setSelectedPlaylistMode("view");
+        setSelectedPlaylistId(invite.playlistId);
+      } else {
+        toast.success("Invite declined");
+      }
+    } catch (error) {
+      console.error("Failed to respond to pending invite:", error);
+      toast.error("Could not process invite response");
+    } finally {
+      setPendingInviteActionId((prev) => (prev === invite.notificationId ? null : prev));
     }
   };
 
@@ -438,6 +721,7 @@ export function YourSpacePage({
       contributors: [] as Array<{ id: string; name: string; avatar: string }>,
         trackCount: Number(row.track_count || row.tracks_count || 0),
         creatorId: String(row.creator_id || row.created_by || ""),
+        creatorName: null,
       pendingInviteCount: Number(row.pending_invite_count || 0),
       lastUpdated: row.updated_at ? "Recently" : "Just now",
     });
@@ -446,13 +730,14 @@ export function YourSpacePage({
       try {
         const [modernPlaylistsRes, modernCollaboratorsRes, legacyPlaylistsRes, legacyContributorsRes] = await Promise.all([
           supabase.from("collaborative_playlists").select("*").order("updated_at", { ascending: false }),
-          supabase.from("playlist_collaborators").select("playlist_id,user_id"),
+          supabase.from("playlist_collaborators").select("playlist_id,user_id,role"),
           supabase.from("playlists").select("*").order("updated_at", { ascending: false }),
           supabase.from("playlist_contributors").select("playlist_id,user_id"),
         ]);
 
         const basePlaylists = new Map<string, any>();
         const contributorIdsByPlaylist = new Map<string, Set<string>>();
+        const creatorIdsByPlaylist = new Map<string, string>();
 
         const ensureContributorSet = (playlistId: string) => {
           const existing = contributorIdsByPlaylist.get(playlistId);
@@ -487,6 +772,8 @@ export function YourSpacePage({
             ensureBasePlaylist(id, buildBasePlaylist(row));
             if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
             if (row.created_by) ensureContributorSet(id).add(String(row.created_by));
+            if (row.creator_id) creatorIdsByPlaylist.set(id, String(row.creator_id));
+            if (row.created_by) creatorIdsByPlaylist.set(id, String(row.created_by));
           }
         }
 
@@ -497,6 +784,9 @@ export function YourSpacePage({
             if (!playlistId || !userId) continue;
             ensureBasePlaylist(playlistId);
             ensureContributorSet(playlistId).add(userId);
+            if (row.role === "owner") {
+              creatorIdsByPlaylist.set(playlistId, userId);
+            }
           }
         }
 
@@ -506,6 +796,8 @@ export function YourSpacePage({
             if (!id) continue;
             ensureBasePlaylist(id, buildBasePlaylist(row));
             if (row.creator_id) ensureContributorSet(id).add(String(row.creator_id));
+            if (row.creator_id) creatorIdsByPlaylist.set(id, String(row.creator_id));
+            if (row.created_by) creatorIdsByPlaylist.set(id, String(row.created_by));
             if (Array.isArray(row.collaborators)) {
               for (const collaboratorId of row.collaborators) {
                 if (collaboratorId) ensureContributorSet(id).add(String(collaboratorId));
@@ -536,6 +828,8 @@ export function YourSpacePage({
         const nextPlaylists = playlistIds.map((id) => {
           const playlist = basePlaylists.get(id);
           const contributorSet = contributorIdsByPlaylist.get(id) || new Set<string>();
+          const creatorId = creatorIdsByPlaylist.get(id) || playlist.creatorId || "";
+          const creatorProfile = creatorId ? profileMap.get(creatorId) : null;
           return {
             ...playlist,
             contributors: Array.from(contributorSet).map((userId) => {
@@ -546,6 +840,8 @@ export function YourSpacePage({
                 avatar: contributorProfile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
               };
             }),
+            creatorId,
+            creatorName: creatorProfile?.display_name || creatorProfile?.username || playlist.creatorName || null,
           };
         });
 
@@ -1281,6 +1577,8 @@ export function YourSpacePage({
               onUpdatePlaylist={async (updates) => {
                 if (!selectedPlaylistId) return;
 
+                const previousPlaylist = collaborativePlaylists.find((playlist) => playlist.id === selectedPlaylistId);
+
                 updateSharedCollaborativePlaylist(selectedPlaylistId, (playlist) => ({
                   ...playlist,
                   ...updates,
@@ -1289,15 +1587,79 @@ export function YourSpacePage({
 
                 try {
                   await persistCollaborativePlaylistChanges(selectedPlaylistId, updates);
+                  await refreshCollaborativePlaylistMetadata(selectedPlaylistId);
+                  return true;
                 } catch (error) {
                   console.error("Failed to persist collaborative playlist updates:", error);
+                  if (previousPlaylist) {
+                    updateSharedCollaborativePlaylist(selectedPlaylistId, () => previousPlaylist);
+                  }
                   toast.error("Could not save playlist changes");
+                  return false;
                 }
               }}
             />
           ) : (
             /* Playlist Grid View */
             <>
+              {pendingPlaylistInvites.length > 0 && (
+                <Card className="p-4 bg-primary/5 border-primary/30">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-foreground">Pending Playlist Invites</h3>
+                    <Badge variant="outline" className="border-primary/40 text-primary">
+                      {pendingPlaylistInvites.length}
+                    </Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {pendingPlaylistInvites.map((invite) => (
+                      <div key={invite.notificationId} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-background border border-border">
+                        <div className="min-w-0">
+                          <p className="text-sm text-foreground truncate">{invite.title}</p>
+                          <p className="text-xs text-muted-foreground truncate">{invite.message}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-border"
+                            disabled={pendingInviteActionId === invite.notificationId}
+                            onClick={() => handlePendingInviteDecision(invite, "decline")}
+                          >
+                            Decline
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                            disabled={pendingInviteActionId === invite.notificationId}
+                            onClick={() => handlePendingInviteDecision(invite, "accept")}
+                          >
+                            {pendingInviteActionId === invite.notificationId ? "Working..." : "Accept"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            onClick={() => {
+                              window.dispatchEvent(
+                                new CustomEvent("onchord-open-playlist-invite", {
+                                  detail: {
+                                    playlistId: invite.playlistId,
+                                    notificationId: invite.notificationId,
+                                    title: invite.title,
+                                  },
+                                })
+                              );
+                            }}
+                          >
+                            Open
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
               {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <Card key="playlists-count-stat" className="p-4 bg-card border-border text-center">
@@ -1453,7 +1815,7 @@ export function YourSpacePage({
                 onClick={handleAddTrackClick}
               >
                 <Plus className="w-4 h-4 mr-2" />
-                Create New Collaborative Playlist
+                Inspect Collaborative Playlists
               </Button>
             </>
           )}

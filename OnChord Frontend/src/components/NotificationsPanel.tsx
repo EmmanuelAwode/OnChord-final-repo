@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, X, Check, Trash2, Music, Heart, MessageCircle, UserPlus } from 'lucide-react';
+import { Bell, X, Check, Trash2, Music, Heart, MessageCircle, UserPlus, UserMinus } from 'lucide-react';
 import { useRealtimeNotifications } from '../lib/useRealtimeNotifications';
 import { Button } from './ui/button';
 import {
@@ -140,6 +140,8 @@ export default function NotificationsPanel() {
         return <MessageCircle className="h-4 w-4 text-purple-500" />;
       case 'playlist_add':
         return <Music className="h-4 w-4 text-yellow-500" />;
+      case 'playlist_leave':
+        return <UserMinus className="h-4 w-4 text-orange-500" />;
       default:
         return <Bell className="h-4 w-4 text-gray-500" />;
     }

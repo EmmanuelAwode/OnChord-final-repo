@@ -6,7 +6,7 @@ import { formatDateForDisplay } from './localeFormatting';
 export interface Notification {
   id: string;
   userId: string;
-  type: 'like' | 'comment' | 'follow' | 'mention' | 'playlist_invite' | 'review_reply';
+  type: 'like' | 'comment' | 'follow' | 'mention' | 'playlist_invite' | 'playlist_leave' | 'review_reply';
   title: string;
   message: string;
   actionUserId?: string;
@@ -15,6 +15,7 @@ export interface Notification {
   reviewId?: string;
   playlistId?: string;
   isRead: boolean;
+  isHidden: boolean;
   timestamp: string;
   createdAt: string;
 }
@@ -63,6 +64,7 @@ export function useRealtimeNotifications() {
         },
         (payload) => {
           const newNotification = transformNotification(payload.new);
+          if (newNotification.isHidden) return;
           setNotifications((prev) => [newNotification, ...prev]);
           setUnreadCount((prev) => prev + 1);
           
@@ -80,6 +82,14 @@ export function useRealtimeNotifications() {
         },
         (payload) => {
           const updatedNotification = transformNotification(payload.new);
+          if (updatedNotification.isHidden) {
+            setNotifications((prev) => prev.filter((n) => n.id !== updatedNotification.id));
+            if (!updatedNotification.isRead) {
+              setUnreadCount((prev) => Math.max(0, prev - 1));
+            }
+            return;
+          }
+
           setNotifications((prev) =>
             prev.map((n) => (n.id === updatedNotification.id ? updatedNotification : n))
           );
@@ -108,6 +118,7 @@ export function useRealtimeNotifications() {
         .from('notifications')
         .select('*')
         .eq('user_id', currentUserId)
+        .eq('is_hidden', false)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -169,7 +180,7 @@ export function useRealtimeNotifications() {
     try {
       const { error: deleteError } = await supabase
         .from('notifications')
-        .delete()
+        .update({ is_hidden: true })
         .eq('id', notificationId);
 
       if (deleteError) throw deleteError;
@@ -193,6 +204,7 @@ export function useRealtimeNotifications() {
       reviewId: data.review_id,
       playlistId: data.playlist_id,
       isRead: data.is_read,
+      isHidden: data.is_hidden ?? false,
       timestamp: formatTimestamp(data.created_at),
       createdAt: data.created_at,
     };

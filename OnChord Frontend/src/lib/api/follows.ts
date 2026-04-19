@@ -65,12 +65,68 @@ export async function followUser(userId: string): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) throw new Error("Not authenticated");
 
+  const followerId = session.session.user.id;
+
   const { error } = await supabase.from("follows").insert({
-    follower_id: session.session.user.id,
+    follower_id: followerId,
     following_id: userId,
   });
 
   if (error) throw error;
+
+  // Emit a follow notification to the user being followed.
+  try {
+    const [followerProfileRes, existingNotificationRes] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("display_name, username, avatar_url")
+        .eq("id", followerId)
+        .maybeSingle(),
+      supabase
+        .from("notifications")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("type", "follow")
+        .eq("action_user_id", followerId)
+        .eq("is_read", false)
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    if (existingNotificationRes.data?.id) {
+      return;
+    }
+
+    const followerName =
+      followerProfileRes.data?.display_name ||
+      followerProfileRes.data?.username ||
+      session.session.user.user_metadata?.full_name ||
+      session.session.user.user_metadata?.name ||
+      session.session.user.email?.split("@")[0] ||
+      "A user";
+
+    const followerAvatar =
+      followerProfileRes.data?.avatar_url ||
+      session.session.user.user_metadata?.avatar_url ||
+      null;
+
+    const { error: notificationError } = await supabase.from("notifications").insert({
+      user_id: userId,
+      type: "follow",
+      title: "New follower",
+      message: `${followerName} started following you.`,
+      action_user_id: followerId,
+      action_user_name: followerName,
+      action_user_avatar: followerAvatar,
+      is_read: false,
+    });
+
+    if (notificationError) {
+      console.warn("Failed to create follow notification:", notificationError);
+    }
+  } catch (notificationErr) {
+    console.warn("Failed to emit follow notification:", notificationErr);
+  }
 }
 
 /**
