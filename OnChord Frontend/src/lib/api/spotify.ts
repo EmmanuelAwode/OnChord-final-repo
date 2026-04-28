@@ -199,20 +199,19 @@ export async function handleSpotifyCallback(code: string) {
   // Calculate expiry time
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-  // Store/update tokens in Supabase
-  const { error } = await supabase.from("spotify_connections").upsert({
-    user_id: sessionData.session.user.id,
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_at: expiresAt,
-    spotify_user_id: profile.id,
-    spotify_display_name: profile.display_name,
-    spotify_email: profile.email,
-    updated_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    throw new Error(`Failed to save Spotify connection: ${error.message}`);
+  // Use the safe connection save function with fallback handling
+  try {
+    await saveSpotifyConnection({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expires_at: expiresAt,
+      spotify_user_id: profile.id,
+      spotify_display_name: profile.display_name,
+      spotify_email: profile.email,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    throw new Error(`Failed to save Spotify connection: ${e.message}`);
   }
 
   // Update in-memory cache
@@ -449,6 +448,69 @@ export async function disconnectSpotify() {
   cachedTokenExpiry = 0;
   refreshBlockedUntil = 0;
   setManualDisconnectFlag(true);
+}
+
+/**
+ * Safely saves Spotify connection with fallback handling for RLS issues
+ * Used during OAuth auto-linking on sign-in
+ */
+export async function saveSpotifyConnection(connectionData: any) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  
+  if (!sessionData.session?.user) {
+    throw new Error("Not authenticated - cannot save Spotify connection");
+  }
+  
+  const userId = sessionData.session.user.id;
+  const payload = {
+    user_id: userId,
+    ...connectionData,
+  };
+  
+  console.log("[Spotify Connection Save] Attempting upsert for user:", userId);
+  
+  // Try upsert first
+  const { data, error } = await supabase
+    .from("spotify_connections")
+    .upsert(payload, { onConflict: "user_id" });
+  
+  if (!error) {
+    console.log("[Spotify Connection Save] Upsert succeeded");
+    return data;
+  }
+  
+  console.warn("[Spotify Connection Save] Upsert failed:", error.message);
+  
+  // If it's an RLS error, try delete + insert
+  if (error.message?.includes("row level security")) {
+    console.log("[Spotify Connection Save] Trying delete + insert fallback");
+    
+    try {
+      // Delete existing
+      await supabase
+        .from("spotify_connections")
+        .delete()
+        .eq("user_id", userId);
+      
+      // Insert fresh
+      const { data: insertData, error: insertError } = await supabase
+        .from("spotify_connections")
+        .insert(payload);
+      
+      if (insertError) {
+        throw insertError;
+      }
+      
+      console.log("[Spotify Connection Save] Delete + insert succeeded");
+      return insertData;
+    } catch (fallbackError: any) {
+      console.error("[Spotify Connection Save] Fallback failed:", fallbackError.message);
+      throw new Error(`Failed to save Spotify connection: ${fallbackError.message}`);
+    }
+  }
+  
+  // Re-throw original error if not RLS
+  throw error;
 }
 
 // ============================================

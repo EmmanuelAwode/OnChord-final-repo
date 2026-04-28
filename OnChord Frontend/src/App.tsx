@@ -16,7 +16,7 @@ import { useReviews } from "./lib/useUserInteractions";
 import { useNavigationHistory } from "./lib/useNavigationHistory";
 import { setupSessionCacheListener } from "./lib/sessionCache";
 import { supabase } from "./lib/supabaseClient";
-import { getAlbum, isSpotifyAutolinkDisabled } from "./lib/api/spotify";
+import { getAlbum, isSpotifyAutolinkDisabled, saveSpotifyConnection } from "./lib/api/spotify";
 import { Toaster } from "./components/ui/sonner";
 
 // Lazy-loaded page components for code-splitting
@@ -312,6 +312,7 @@ export default function App() {
         const code = params.get("code");
         const spotifyVerifier = sessionStorage.getItem("spotify_pkce_code_verifier");
         const spotifyFlowMarker = sessionStorage.getItem("spotify_pkce_flow");
+        const isSocialLogin = sessionStorage.getItem("spotify_social_login") === "true";
 
         // Clean URL immediately — remove stale code params and path fragments
         // This prevents SettingsPage from trying to re-process old Spotify callbacks
@@ -335,6 +336,9 @@ export default function App() {
           navigate("settings");
           return;
         }
+        
+        // Clear social login marker for next time
+        sessionStorage.removeItem("spotify_social_login");
 
         // For Supabase OAuth / email verification:
         // detectSessionInUrl + flowType: "pkce" handles the code exchange automatically
@@ -384,6 +388,9 @@ export default function App() {
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       if (!mounted) return;
+      
+      console.log("[Auth State Change]", _event, "Session user:", newSession?.user?.id);
+      
       setSession(newSession);
       // Fetch profile in background (non-blocking)
       syncProfileInBackground(newSession?.user ?? null);
@@ -396,29 +403,43 @@ export default function App() {
         newSession.provider_token &&
         !isSpotifyAutolinkDisabled()
       ) {
-        try {
-          const user = newSession.user;
-          const spotifyProfile = user.user_metadata;
-          await supabase.from("spotify_connections").upsert(
-            {
-              user_id: user.id,
+        // Run in background with delay to ensure session is fully established
+        setTimeout(async () => {
+          try {
+            const user = newSession.user;
+            const spotifyProfile = user.user_metadata;
+            console.log("[Spotify Auto-Link] Starting auto-link for user:", user.id);
+            console.log("[Spotify Auto-Link] Provider token exists:", !!newSession.provider_token);
+            console.log("[Spotify Auto-Link] Refresh token exists:", !!newSession.provider_refresh_token);
+            
+            // Warn if refresh token is missing (shouldn't happen with Spotify OAuth but log it)
+            if (!newSession.provider_refresh_token) {
+              console.warn("[Spotify Auto-Link] WARNING: No refresh token provided by Spotify. User may need to reconnect later.");
+            }
+            
+            // Verify session is current before attempting upsert
+            const { data: sessionData } = await supabase.auth.getSession();
+            if (!sessionData.session?.user || sessionData.session.user.id !== user.id) {
+              console.warn("[Spotify Auto-Link] Session mismatch or lost, skipping auto-link");
+              return;
+            }
+            
+            // Use the safer connection save function
+            await saveSpotifyConnection({
               access_token: newSession.provider_token,
-              ...(newSession.provider_refresh_token
-                ? { refresh_token: newSession.provider_refresh_token }
-                : {}),
-              expires_at: new Date(
-                Date.now() + 3600 * 1000
-              ).toISOString(),
+              refresh_token: newSession.provider_refresh_token || "unknown",
+              expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
               spotify_user_id: spotifyProfile?.provider_id ?? spotifyProfile?.sub ?? null,
               spotify_display_name: spotifyProfile?.full_name ?? spotifyProfile?.name ?? null,
               spotify_email: spotifyProfile?.email ?? user.email ?? null,
-            },
-            { onConflict: "user_id" }
-          );
-          console.log("Auto-linked Spotify connection from social login");
-        } catch (e) {
-          console.error("Failed to auto-link Spotify connection:", e);
-        }
+            });
+            
+            console.log("[Spotify Auto-Link] Success - connection saved");
+          } catch (e: any) {
+            console.error("[Spotify Auto-Link] Failed:", e?.message);
+            // Don't re-throw - let user stay logged in even if auto-link fails
+          }
+        }, 500); // Delay 500ms to let session settle
       }
     });
 

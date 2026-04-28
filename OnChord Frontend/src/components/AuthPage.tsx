@@ -59,10 +59,13 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
     sessionStorage.removeItem("spotify_pkce_code_verifier");
     sessionStorage.removeItem("spotify_pkce_flow");
     try {
+      // Use absolute home URL as redirect target - Supabase will add #access_token to it
+      const redirectUrl = new URL("/", window.location.origin).toString();
+      
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "spotify",
         options: {
-          redirectTo: window.location.origin,
+          redirectTo: redirectUrl,
           scopes:
             "user-read-email user-read-private user-top-read user-read-recently-played playlist-read-private playlist-read-collaborative",
           skipBrowserRedirect: true,
@@ -74,13 +77,16 @@ export function AuthPage({ onAuthed }: AuthPageProps) {
       if (error) throw error;
 
       if (data?.url) {
+        // Mark this as Supabase social login (not Spotify API connect)
+        sessionStorage.setItem("spotify_social_login", "true");
         window.location.href = data.url;
       } else {
-        throw new Error("No redirect URL returned from Supabase");
+        throw new Error("No redirect URL returned from Supabase. Check that Spotify OAuth is configured in Supabase.");
       }
     } catch (error: any) {
       captureException(error, "spotify-oauth-login");
-      const msg = error?.message || "Failed to connect with Spotify";
+      const msg = error?.message || "Failed to connect with Spotify. Ensure Spotify OAuth provider is configured in Supabase.";
+      console.error("[Spotify Login Error]", error);
       setErrorMsg(msg);
       toast.error(msg);
       setSpotifyLoading(false);
